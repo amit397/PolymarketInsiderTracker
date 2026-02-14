@@ -87,13 +87,12 @@ class Scanner:
         global_mean = statistics.mean(all_sizes) if all_sizes else 0.0
         global_std = statistics.stdev(all_sizes) if len(all_sizes) > 1 else 1.0
 
-        # 4. Group trades by market (conditionId) for per-market stats
-        market_trades: dict[str, list[float]] = defaultdict(list)
+        # 4. Group full trade dicts by market (conditionId)
+        market_trades: dict[str, list[dict]] = defaultdict(list)
         for trade in trades:
             cid = trade.get("conditionId", "")
-            size = trade.get("size", 0)
-            if cid and size > 0:
-                market_trades[cid].append(size)
+            if cid:
+                market_trades[cid].append(trade)
 
         # 5. Score each wallet
         alerts: list[dict[str, Any]] = []
@@ -142,7 +141,8 @@ class Scanner:
         trade_side = trade.get("side", "BUY")
 
         # --- N_V: Volume Anomaly ---
-        m_sizes = market_trades.get(condition_id, [])
+        m_trade_list = market_trades.get(condition_id, [])
+        m_sizes = [t.get("size", 0) for t in m_trade_list if t.get("size", 0) > 0]
         m_count = len(m_sizes)
         m_mean = statistics.mean(m_sizes) if m_sizes else 0.0
         m_std = statistics.stdev(m_sizes) if len(m_sizes) > 1 else 0.0
@@ -187,15 +187,15 @@ class Scanner:
         # Use subsequent trades in the same market as price proxy
         nr = 0.0
         subsequent_prices = [
-            t.get("price", 0)
-            for t in market_trades.get(condition_id, [])
-            if t.get("timestamp", 0) > trade_ts
-            and isinstance(t, dict)
+            float(t.get("price", 0))
+            for t in m_trade_list
+            if isinstance(t, dict)
+            and t.get("timestamp", 0) > trade_ts
+            and t.get("price", 0)
         ]
-        if subsequent_prices:
-            # Use the latest price as the "after" price
-            price_after = subsequent_prices[-1] if isinstance(subsequent_prices[-1], (int, float)) else 0
-            nr = compute_rapid_profit(trade_price, price_after, trade_side)
+        if subsequent_prices and trade_price:
+            price_after = subsequent_prices[-1]
+            nr = compute_rapid_profit(float(trade_price), price_after, trade_side)
 
         # --- Compute final score ---
         return compute_suspicion_score(
@@ -220,15 +220,15 @@ class Scanner:
             return self._market_cache[slug]
 
         try:
-            markets = await self.gamma.fetch_markets(limit=1)
-            # Search for matching slug in recent markets
-            for m in markets:
-                if m.get("slug") == slug:
-                    self._market_cache[slug] = m
-                    return m
+            # Query Gamma API filtering by slug
+            markets = await self.gamma.fetch_markets(limit=1, slug=slug)
+            if markets:
+                self._market_cache[slug] = markets[0]
+                return markets[0]
             self._market_cache[slug] = None
             return None
-        except Exception:
+        except Exception as e:
+            logger.debug("Failed to fetch market info for slug=%s: %s", slug, e)
             self._market_cache[slug] = None
             return None
 
@@ -259,6 +259,20 @@ class Scanner:
 
         db = await get_db()
         try:
+            # Upsert wallet FIRST (alerts has FK to wallets.address)
+            await db.execute(
+                """
+                INSERT INTO wallets (address, total_trades, total_volume, last_scanned)
+                VALUES (?, 1, ?, ?)
+                ON CONFLICT(address) DO UPDATE SET
+                    total_trades = total_trades + 1,
+                    total_volume = total_volume + excluded.total_volume,
+                    last_scanned = excluded.last_scanned
+                """,
+                (wallet, trade.get("size", 0), alert["created_at"]),
+            )
+
+            # Now insert the alert
             await db.execute(
                 """
                 INSERT INTO alerts
@@ -280,20 +294,6 @@ class Scanner:
                     alert["trade_side"],
                     alert["created_at"],
                 ),
-            )
-            await db.commit()
-
-            # Also upsert the wallet record
-            await db.execute(
-                """
-                INSERT INTO wallets (address, total_trades, total_volume, last_scanned)
-                VALUES (?, 1, ?, ?)
-                ON CONFLICT(address) DO UPDATE SET
-                    total_trades = total_trades + 1,
-                    total_volume = total_volume + excluded.total_volume,
-                    last_scanned = excluded.last_scanned
-                """,
-                (wallet, trade.get("size", 0), alert["created_at"]),
             )
             await db.commit()
         finally:

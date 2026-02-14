@@ -31,6 +31,8 @@ class PolygonscanClient:
         if self._owns_client:
             await self._client.aclose()
 
+    _warned_no_key = False
+
     async def fetch_wallet_age_days(self, address: str) -> float | None:
         """
         Return the age of *address* in days based on its first
@@ -40,7 +42,9 @@ class PolygonscanClient:
         transactions.
         """
         if not POLYGONSCAN_API_KEY:
-            logger.warning("POLYGONSCAN_API_KEY not set – wallet age unavailable")
+            if not PolygonscanClient._warned_no_key:
+                logger.info("POLYGONSCAN_API_KEY not set – wallet freshness factor (N_F) disabled")
+                PolygonscanClient._warned_no_key = True
             return None
 
         try:

@@ -60,6 +60,9 @@ class DataClient:
             params["after"] = after
 
         resp = await self._client.get("/trades", params=params)
+        if resp.status_code == 400:
+            logger.warning("Data API returned 400 (offset=%s) – stopping pagination", offset)
+            return []
         resp.raise_for_status()
         return resp.json()
 
@@ -149,7 +152,7 @@ class DataClient:
         self,
         since_timestamp: int,
         *,
-        max_pages: int = 50,
+        max_pages: int = 10,
     ) -> list[dict[str, Any]]:
         """
         Fetch all trades since *since_timestamp* (unix epoch).

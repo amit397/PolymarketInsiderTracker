@@ -39,6 +39,7 @@ class GammaClient:
         offset: int = 0,
         closed: bool = False,
         tag_id: str | None = None,
+        slug: str | None = None,
         end_date_min: str | None = None,
         end_date_max: str | None = None,
     ) -> list[dict[str, Any]]:
@@ -50,6 +51,8 @@ class GammaClient:
         }
         if tag_id:
             params["tag_id"] = tag_id
+        if slug:
+            params["slug"] = slug
         if end_date_min:
             params["end_date_min"] = end_date_min
         if end_date_max:

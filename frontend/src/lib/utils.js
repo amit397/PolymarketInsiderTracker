@@ -1,0 +1,76 @@
+/**
+ * Get CSS class for a suspicion score badge.
+ */
+export function scoreClass(score) {
+    if (score >= 80) return "score-critical";
+    if (score >= 60) return "score-high";
+    if (score >= 40) return "score-medium";
+    return "score-low";
+}
+
+/**
+ * Format a wallet address for display (0x1234...abcd).
+ */
+export function shortAddr(addr) {
+    if (!addr || addr.length < 10) return addr || "—";
+    return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
+}
+
+/**
+ * Format a number with commas and optional decimals.
+ */
+export function formatNum(n, decimals = 0) {
+    if (n == null) return "—";
+    return Number(n).toLocaleString("en-US", {
+        minimumFractionDigits: decimals,
+        maximumFractionDigits: decimals,
+    });
+}
+
+/**
+ * Format a dollar amount.
+ */
+export function formatUSD(n) {
+    if (n == null) return "—";
+    if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
+    if (n >= 1_000) return `$${(n / 1_000).toFixed(1)}K`;
+    return `$${Number(n).toFixed(2)}`;
+}
+
+/**
+ * Convert hours to a human-readable countdown string.
+ */
+export function formatCountdown(hours) {
+    if (hours <= 0) return "Expired";
+    if (hours < 1) return `${Math.round(hours * 60)}m`;
+    if (hours < 24) return `${Math.round(hours)}h`;
+    const days = Math.floor(hours / 24);
+    const hrs = Math.round(hours % 24);
+    return hrs > 0 ? `${days}d ${hrs}h` : `${days}d`;
+}
+
+/**
+ * Relative time string (e.g., "2m ago", "3h ago").
+ */
+export function timeAgo(isoString) {
+    if (!isoString) return "";
+    const diffMs = Date.now() - new Date(isoString).getTime();
+    const mins = Math.floor(diffMs / 60000);
+    if (mins < 1) return "just now";
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    const days = Math.floor(hrs / 24);
+    return `${days}d ago`;
+}
+
+/**
+ * Human-readable factor names.
+ */
+export const FACTOR_LABELS = {
+    volume_anomaly: "Volume Anomaly",
+    topic_concentration: "Topic Concentration",
+    market_timing: "Market Timing",
+    wallet_freshness: "Wallet Freshness",
+    rapid_profit: "Rapid Profit",
+};

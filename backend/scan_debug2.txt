@@ -1,0 +1,140 @@
+﻿.\venv\Scripts\python.
+exe : 
+POLYGONSCAN_API_KEY 
+not set û wallet age 
+unavailable
+At line:1 char:1
++ .\venv\Scripts\pytho
+n.exe test_scan.py 
+2>&1 | Out-File 
+-FilePath scan ...
++ ~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~
+~
+    + CategoryInfo    
+          : NotSpeci  
+  fied: (POLYGONSCA   
+ N_API...age unava    
+ilable:String) []    
+, RemoteException
+    + FullyQualifiedE 
+   rrorId : NativeCo  
+  mmandError
+ 
+POLYGONSCAN_API_KEY 
+not set û wallet age 
+unavailable
+POLYGONSCAN_API_KEY 
+not set û wallet age 
+unavailable
+POLYGONSCAN_API_KEY 
+not set û wallet age 
+unavailable
+POLYGONSCAN_API_KEY 
+not set û wallet age 
+unavailable
+POLYGONSCAN_API_KEY 
+not set û wallet age 
+unavailable
+POLYGONSCAN_API_KEY 
+not set û wallet age 
+unavailable
+POLYGONSCAN_API_KEY 
+not set û wallet age 
+unavailable
+POLYGONSCAN_API_KEY 
+not set û wallet age 
+unavailable
+POLYGONSCAN_API_KEY 
+not set û wallet age 
+unavailable
+POLYGONSCAN_API_KEY 
+not set û wallet age 
+unavailable
+POLYGONSCAN_API_KEY 
+not set û wallet age 
+unavailable
+POLYGONSCAN_API_KEY 
+not set û wallet age 
+unavailable
+POLYGONSCAN_API_KEY 
+not set û wallet age 
+unavailable
+POLYGONSCAN_API_KEY 
+not set û wallet age 
+unavailable
+POLYGONSCAN_API_KEY 
+not set û wallet age 
+unavailable
+POLYGONSCAN_API_KEY 
+not set û wallet age 
+unavailable
+POLYGONSCAN_API_KEY 
+not set û wallet age 
+unavailable
+Traceback (most 
+recent call last):
+  File "C:\Users\User\
+Desktop\PolymarketInsi
+derTracker\backend\tes
+t_scan.py", line 10, 
+in test
+    alerts = await s.r
+un_scan(lookback_hours
+=1)
+             ^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^
+^^^
+  File "C:\Users\User\
+Desktop\PolymarketInsi
+derTracker\backend\app
+\services\scanner.py",
+ line 112, in run_scan
+    alert = await 
+self._persist_alert(
+            ^^^^^^^^^^
+^^^^^^^^^^^^^^^^
+  File "C:\Users\User\
+Desktop\PolymarketInsi
+derTracker\backend\app
+\services\scanner.py",
+ line 262, in 
+_persist_alert
+    await db.execute(
+  File "C:\Users\User\
+Desktop\PolymarketInsi
+derTracker\backend\ven
+v\Lib\site-packages\ai
+osqlite\core.py", 
+line 193, in execute
+    cursor = await sel
+f._execute(self._conn.
+execute, sql, 
+parameters)
+             ^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^
+^^^
+  File "C:\Users\User\
+Desktop\PolymarketInsi
+derTracker\backend\ven
+v\Lib\site-packages\ai
+osqlite\core.py", 
+line 132, in _execute
+    return await 
+future
+           
+^^^^^^^^^^^^
+  File "C:\Users\User\
+Desktop\PolymarketInsi
+derTracker\backend\ven
+v\Lib\site-packages\ai
+osqlite\core.py", 
+line 115, in run
+    result = 
+function()
+             
+^^^^^^^^^^
+sqlite3.IntegrityError
+: FOREIGN KEY 
+constraint failed

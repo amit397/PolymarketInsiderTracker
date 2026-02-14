@@ -1,0 +1,21 @@
+import "./globals.css";
+import Navbar from "@/components/Navbar";
+
+export const metadata = {
+  title: "Insider Tracker — Polymarket Suspicious Activity Monitor",
+  description:
+    "Real-time detection and scoring of suspicious trading activity on Polymarket prediction markets.",
+};
+
+export default function RootLayout({ children }) {
+  return (
+    <html lang="en">
+      <body>
+        <Navbar />
+        <main className="app-container page-content">
+          {children}
+        </main>
+      </body>
+    </html>
+  );
+}
