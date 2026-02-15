@@ -7,65 +7,66 @@ export default function Navbar() {
     const pathname = usePathname();
 
     const links = [
-        { href: "/", label: "Dashboard", icon: DashboardIcon },
-        { href: "/expiring", label: "Expiring", icon: ClockIcon },
-        { href: "/markets", label: "Markets", icon: ChartIcon },
+        { href: "/", label: "Monitor", icon: MonitorIcon },
+        { href: "/expiring", label: "Expiring", icon: TimerIcon },
+        { href: "/markets", label: "Markets", icon: GridIcon },
     ];
 
     return (
         <nav className="navbar">
             <div className="navbar-inner">
-                <Link href="/" className="navbar-brand">
-                    <span className="navbar-brand-icon">🔍</span>
-                    <span>Insider</span>
-                    <span style={{ color: "var(--accent-primary)" }}>Tracker</span>
+                <Link href="/" className="brand">
+                    <div className="brand-icon">M</div>
+                    <span>MarketMonitor</span>
                 </Link>
 
-                <div className="navbar-links">
-                    {links.map(({ href, label, icon: Icon }) => (
-                        <Link
-                            key={href}
-                            href={href}
-                            className={`nav-link ${pathname === href ? "active" : ""}`}
-                        >
-                            <Icon />
-                            {label}
-                        </Link>
-                    ))}
+                <div className="nav-links">
+                    {links.map((link) => {
+                        const isActive = pathname === link.href;
+                        return (
+                            <Link
+                                key={link.href}
+                                href={link.href}
+                                className={`nav-link ${isActive ? "active" : ""}`}
+                            >
+                                {link.label}
+                            </Link>
+                        );
+                    })}
                 </div>
             </div>
         </nav>
     );
 }
 
-/* ── Inline SVG icons ── */
+/* ── Icons ── */
 
-function DashboardIcon() {
+function MonitorIcon() {
     return (
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="3" y="3" width="7" height="7" rx="1" />
-            <rect x="14" y="3" width="7" height="4" rx="1" />
-            <rect x="14" y="11" width="7" height="10" rx="1" />
-            <rect x="3" y="14" width="7" height="7" rx="1" />
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+            <line x1="8" y1="21" x2="16" y2="21" />
+            <line x1="12" y1="17" x2="12" y2="21" />
         </svg>
     );
 }
 
-function ClockIcon() {
+function TimerIcon() {
     return (
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="12" cy="12" r="10" />
             <polyline points="12 6 12 12 16 14" />
         </svg>
     );
 }
 
-function ChartIcon() {
+function GridIcon() {
     return (
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <line x1="18" y1="20" x2="18" y2="10" />
-            <line x1="12" y1="20" x2="12" y2="4" />
-            <line x1="6" y1="20" x2="6" y2="14" />
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="3" width="7" height="7" />
+            <rect x="14" y="3" width="7" height="7" />
+            <rect x="14" y="14" width="7" height="7" />
+            <rect x="3" y="14" width="7" height="7" />
         </svg>
     );
 }

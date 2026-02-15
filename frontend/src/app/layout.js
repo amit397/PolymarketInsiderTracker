@@ -12,7 +12,7 @@ export default function RootLayout({ children }) {
     <html lang="en">
       <body>
         <Navbar />
-        <main className="app-container page-content">
+        <main className="container" style={{ paddingBottom: "var(--space-12)", paddingTop: "var(--space-8)" }}>
           {children}
         </main>
       </body>

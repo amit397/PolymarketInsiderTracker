@@ -4,7 +4,6 @@ import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { fetchAlerts, fetchStats, triggerScan, fetchExpiringMarkets } from "@/lib/api";
 import {
-  scoreClass,
   shortAddr,
   formatNum,
   formatUSD,
@@ -15,6 +14,7 @@ import {
 
 /* ═══════════════════════════════════════════════════════════
    Dashboard Home Page
+   Theme: Financial Terminal
    ═══════════════════════════════════════════════════════════ */
 
 export default function DashboardPage() {
@@ -34,7 +34,7 @@ export default function DashboardPage() {
       setStats(s);
       setAlerts(a);
     } catch {
-      /* backend offline — show empty */
+      /* backend offline — use skeleton/empty states */
     }
     setLoading(false);
   }, []);
@@ -61,337 +61,236 @@ export default function DashboardPage() {
 
   return (
     <>
-      {/* ── Header ── */}
-      <div className="section-header" style={{ marginBottom: "var(--space-6)" }}>
+      <div style={{ marginBottom: "var(--space-8)", display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
         <div>
-          <h1 className="section-title" style={{ fontSize: "1.5rem", fontWeight: 800, letterSpacing: "-0.03em" }}>
-            Activity Monitor
+          <h1 className="display" style={{ fontSize: "2rem", fontWeight: 700, color: "var(--text-main)", lineHeight: 1.1 }}>
+            Network Activity
           </h1>
-          <p className="section-subtitle">
-            Real-time suspicion scoring across Polymarket
+          <p className="mono" style={{ fontSize: "0.85rem", color: "var(--text-muted)", marginTop: "var(--space-2)" }}>
+            Real-time surveillance of prediction market flows
           </p>
         </div>
         <button
-          className="btn btn-primary"
           onClick={handleScan}
+          className="btn btn-primary"
           disabled={scanning}
         >
-          {scanning ? (
-            <><span className="spinner" /> Scanning…</>
-          ) : (
-            <>
-              <ScanIcon />
-              Run Scan
-            </>
-          )}
+          {scanning ? "SCANNING..." : "RUN ANALYSIS"}
         </button>
       </div>
 
-      {/* ── Stats ── */}
       <div className="stats-grid">
-        <StatCard label="Total Alerts" value={stats ? formatNum(stats.total_alerts) : "—"} />
-        <StatCard label="Wallets Scanned" value={stats ? formatNum(stats.total_wallets_scanned) : "—"} />
-        <StatCard label="Top Score" value={stats ? formatNum(stats.max_score, 1) : "—"} color="var(--score-critical)" />
-        <StatCard label="Today" value={stats ? formatNum(stats.alerts_today) : "—"} accent />
+        <StatCard label="Active Alerts" value={stats ? formatNum(stats.total_alerts) : "—"} />
+        <StatCard label="Wallets Analyzed" value={stats ? formatNum(stats.total_wallets_scanned) : "—"} />
+        <StatCard label="Max Risk Score" value={stats ? formatNum(stats.max_score, 1) : "—"} highlight={stats?.max_score > 80} />
+        <StatCard label="24h Volume" value="—" />
       </div>
 
-      {/* ── Tab switcher ── */}
-      <div className="tab-group">
-        <button className={`tab-btn ${tab === "alerts" ? "active" : ""}`} onClick={() => setTab("alerts")}>
-          <AlertsIcon /> All Alerts
-          {alerts.length > 0 && <span className="tab-count">{alerts.length}</span>}
-        </button>
-        <button className={`tab-btn ${tab === "expiring" ? "active" : ""}`} onClick={() => setTab("expiring")}>
-          <ClockIcon /> Expiring Soon
-        </button>
+      <div className="panel" style={{ padding: "var(--space-6)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "var(--space-6)" }}>
+          <div style={{ display: "flex", gap: "var(--space-4)" }}>
+            <button
+              className={`nav-link ${tab === "alerts" ? "active" : ""}`}
+              onClick={() => setTab("alerts")}
+              style={{ background: "none", border: "none", borderBottom: tab === "alerts" ? "1px solid var(--brand-primary)" : "1px solid transparent", cursor: "pointer" }}
+            >
+              LIVE FEED
+            </button>
+            <button
+              className={`nav-link ${tab === "expiring" ? "active" : ""}`}
+              onClick={() => setTab("expiring")}
+              style={{ background: "none", border: "none", borderBottom: tab === "expiring" ? "1px solid var(--brand-primary)" : "1px solid transparent", cursor: "pointer" }}
+            >
+              EXPIRING
+            </button>
+          </div>
+
+          {tab === "alerts" && (
+            <Link href="/markets" className="btn btn-outline" style={{ fontSize: "0.7rem", padding: "4px 8px" }}>
+              VIEW ALL MARKETS →
+            </Link>
+          )}
+        </div>
+
+        {tab === "alerts" && (
+          <AlertsFeed
+            alerts={alerts}
+            loading={loading}
+            expanded={expandedAlert}
+            onToggle={(id) => setExpandedAlert(expandedAlert === id ? null : id)}
+          />
+        )}
+
+        {tab === "expiring" && (
+          <ExpiringSection
+            markets={expiring}
+            horizon={horizon}
+            onHorizonChange={setHorizon}
+          />
+        )}
       </div>
-
-      {/* ── Content ── */}
-      {tab === "alerts" && (
-        <AlertsFeed
-          alerts={alerts}
-          loading={loading}
-          expanded={expandedAlert}
-          onToggle={(id) => setExpandedAlert(expandedAlert === id ? null : id)}
-        />
-      )}
-
-      {tab === "expiring" && (
-        <ExpiringSection
-          markets={expiring}
-          horizon={horizon}
-          onHorizonChange={setHorizon}
-        />
-      )}
     </>
   );
 }
 
-/* ═══════════════════════════════════════════════════════════
-   Stat Card
-   ═══════════════════════════════════════════════════════════ */
+/* ── Components ── */
 
-function StatCard({ label, value, color, accent }) {
+function StatCard({ label, value, highlight }) {
   return (
-    <div className="stat-card">
+    <div className="stat-card" style={highlight ? { borderColor: "var(--signal-danger)" } : {}}>
       <span className="stat-label">{label}</span>
-      <span
-        className="stat-value"
-        style={color ? { color } : accent ? { background: "var(--accent-gradient)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" } : undefined}
-      >
+      <span className="stat-value" style={highlight ? { color: "var(--signal-danger)" } : {}}>
         {value}
       </span>
     </div>
   );
 }
 
-/* ═══════════════════════════════════════════════════════════
-   Alerts Feed
-   ═══════════════════════════════════════════════════════════ */
-
 function AlertsFeed({ alerts, loading, expanded, onToggle }) {
-  if (loading) {
-    return (
-      <div className="alert-list">
-        {[...Array(5)].map((_, i) => (
-          <div key={i} className="alert-row" style={{ pointerEvents: "none" }}>
-            <div className="skeleton" style={{ width: 36, height: 36 }} />
-            <div style={{ display: "flex", flexDirection: "column", gap: 6, flex: 1 }}>
-              <div className="skeleton skeleton-text" style={{ width: "75%" }} />
-              <div className="skeleton skeleton-text" style={{ width: "40%" }} />
-            </div>
-            <div className="skeleton" style={{ width: 52, height: 24, borderRadius: 9999 }} />
-          </div>
-        ))}
-      </div>
-    );
-  }
-
-  if (!alerts.length) {
-    return (
-      <div className="empty-state">
-        <div className="empty-icon">📡</div>
-        <div className="empty-title">No alerts yet</div>
-        <div className="empty-desc">
-          Click &quot;Run Scan&quot; to analyze recent trading activity and detect suspicious patterns.
-        </div>
-      </div>
-    );
-  }
+  if (loading) return <div style={{ padding: "var(--space-8)", textAlign: "center", color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>LOADING FEED DATA...</div>;
+  if (!alerts.length) return (
+    <div style={{ padding: "var(--space-12)", textAlign: "center", color: "var(--text-muted)" }}>
+      <div style={{ fontSize: "2rem", marginBottom: "var(--space-2)", opacity: 0.3 }}>📡</div>
+      <div className="mono">NO ANOMALIES DETECTED</div>
+    </div>
+  );
 
   return (
-    <div className="alert-list">
-      {alerts.map((a, i) => (
-        <div key={a.id || i}>
-          <div className="alert-row" onClick={() => onToggle(a.id || i)}>
-            <div className="alert-rank">{i + 1}</div>
-            <div className="alert-info">
-              <a
-                href={`https://polymarket.com/event/${a.market_slug}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="alert-market"
-                onClick={(e) => e.stopPropagation()}
+    <div className="feed-container">
+      {alerts.map((a, i) => {
+        const score = a.suspicion_score || 0;
+        const severity = score > 75 ? "critical" : score > 50 ? "high" : "medium";
+        const isExpanded = expanded === (a.id || i);
+
+        return (
+          <div key={a.id || i} className={`alert-item ${severity}`} style={isExpanded ? { background: "var(--bg-surface)" } : {}}>
+            <div className="alert-rank">#{i + 1}</div>
+
+            <div className="alert-main">
+              <div
+                className="alert-title"
+                style={{ cursor: "pointer" }}
+                onClick={() => onToggle(a.id || i)}
               >
-                {a.market_question || "Unknown market"}
-              </a>
-              <div className="alert-sub-row" style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "0.85rem", color: "var(--fg-muted)" }}>
+                {a.market_question}
+              </div>
+              <div className="alert-meta">
+                <span className="meta-tag">
+                  <span style={{ color: a.trade_side === "BUY" ? "var(--signal-success)" : "var(--signal-danger)" }}>
+                    {a.trade_side}
+                  </span>
+                  <span className="mono"> {formatUSD(a.trade_size)}</span>
+                </span>
+                <span className="meta-tag">
+                  {timeAgo(a.created_at)}
+                </span>
                 <Link
                   href={`/wallet/${a.wallet_address}`}
-                  className="alert-wallet"
+                  className="meta-tag mono"
+                  style={{ color: "var(--brand-primary)" }}
                   onClick={(e) => e.stopPropagation()}
                 >
                   {shortAddr(a.wallet_address)}
                 </Link>
-                {a.wallet_risk_score > 0 && (
-                  <span style={{
-                    fontSize: "0.75rem",
-                    padding: "1px 4px",
-                    borderRadius: 4,
-                    background: "var(--bg-elevated)",
-                    color: a.wallet_risk_score > 50 ? "var(--score-high)" : "var(--fg-muted)"
-                  }}>
-                    Risk: {a.wallet_risk_score.toFixed(0)}
-                  </span>
-                )}
-                <div className="external-links" style={{ display: "flex", gap: 4, marginLeft: 4 }}>
-                  <a href={`https://polymarket.com/profile/${a.wallet_address}`} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} style={{ opacity: 0.6 }}>PM</a>
-                  <a href={`https://polygonscan.com/address/${a.wallet_address}`} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} style={{ opacity: 0.6 }}>Scan</a>
-                </div>
               </div>
-            </div>
-            <div className="alert-meta">
-              <span className="alert-trade-size">
-                {a.trade_side === "BUY" ? "▲" : "▼"} {formatUSD(a.trade_size)}
-              </span>
-              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <span className="alert-time">{timeAgo(a.created_at)}</span>
-                {a.tx_hash && (
-                  <a
-                    href={`https://polygonscan.com/tx/${a.tx_hash}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    onClick={(e) => e.stopPropagation()}
-                    style={{ fontSize: "0.75rem", opacity: 0.6, textDecoration: "none" }}
-                  >
-                    Context ↗
-                  </a>
-                )}
-              </div>
-            </div>
-            <span className={`score-badge ${scoreClass(a.suspicion_score)}`}>
-              {a.suspicion_score?.toFixed(1)}
-            </span>
-          </div>
 
-          {/* Expanded factor breakdown */}
-          {expanded === (a.id || i) && a.factors && (
-            <div className="card" style={{ marginTop: "var(--space-1)", marginLeft: 56 }}>
-              <div className="factor-breakdown">
-                {Object.entries(FACTOR_LABELS).map(([key, label]) => {
-                  const val = a.factors[key] ?? 0;
-                  const isElevated = a.factors.elevated_factors?.includes(key);
-                  return (
-                    <div className="factor-row" key={key}>
-                      <span className="factor-label" style={isElevated ? { color: "var(--accent-primary)", fontWeight: 600 } : undefined}>
-                        {label}
-                      </span>
-                      <div className="factor-bar-track">
-                        <div
-                          className="factor-bar-fill"
-                          style={{
-                            width: `${Math.round(val * 100)}%`,
-                            background: isElevated ? "var(--accent-gradient)" : "var(--bg-elevated)",
-                          }}
-                        />
-                      </div>
-                      <span className="factor-value">{(val * 100).toFixed(0)}%</span>
-                    </div>
-                  );
-                })}
+              {/* Expansion */}
+              {isExpanded && a.factors && (
+                <div style={{ marginTop: "var(--space-4)", paddingTop: "var(--space-4)", borderTop: "1px solid var(--border-dim)", width: "100%" }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: "var(--space-4)" }}>
+                    {Object.entries(FACTOR_LABELS).map(([key, label]) => {
+                      const val = a.factors[key] ?? 0;
+                      if (val < 0.1) return null;
+                      const isHigh = val > 0.7;
+                      return (
+                        <div key={key}>
+                          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.7rem", marginBottom: 4, fontFamily: "var(--font-mono)" }}>
+                            <span style={{ color: "var(--text-muted)" }}>{label}</span>
+                            <span style={{ color: isHigh ? "var(--text-main)" : "var(--text-dim)" }}>{(val * 100).toFixed(0)}%</span>
+                          </div>
+                          <div style={{ height: 4, background: "var(--bg-app)", borderRadius: 2, overflow: "hidden" }}>
+                            <div style={{ height: "100%", width: `${val * 100}%`, background: isHigh ? "var(--signal-warning)" : "var(--text-dim)" }} />
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                  <div style={{ marginTop: "var(--space-4)", textAlign: "right" }}>
+                    <a
+                      href={`https://polymarket.com/event/${a.market_slug}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="btn btn-outline"
+                      style={{ fontSize: "0.7rem", padding: "4px 8px" }}
+                    >
+                      View on Polymarket ↗
+                    </a>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="alert-metrics">
+              <div className="metric-value" style={{
+                color: severity === "critical" ? "var(--signal-danger)" :
+                  severity === "high" ? "var(--signal-warning)" : "var(--signal-info)"
+              }}>
+                {score.toFixed(1)}
               </div>
             </div>
-          )}
-        </div>
-      ))}
+          </div>
+        );
+      })}
     </div>
   );
 }
 
-/* ═══════════════════════════════════════════════════════════
-   Expiring Markets Section
-   ═══════════════════════════════════════════════════════════ */
-
 function ExpiringSection({ markets, horizon, onHorizonChange }) {
-  const options = [
-    { value: 24, label: "24h" },
-    { value: 48, label: "48h" },
-    { value: 72, label: "3d" },
-    { value: 168, label: "7d" },
-  ];
+  const options = [24, 48, 72, 168];
 
   return (
-    <>
-      <div className="horizon-group">
-        {options.map((o) => (
+    <div>
+      <div style={{ marginBottom: "var(--space-4)", display: "flex", gap: "var(--space-2)" }}>
+        {options.map((h) => (
           <button
-            key={o.value}
-            className={`horizon-pill ${horizon === o.value ? "active" : ""}`}
-            onClick={() => onHorizonChange(o.value)}
+            key={h}
+            className="btn btn-outline"
+            style={{
+              borderColor: horizon === h ? "var(--brand-primary)" : "var(--border-dim)",
+              color: horizon === h ? "var(--text-main)" : "var(--text-muted)",
+              fontSize: "0.75rem", padding: "4px 8px"
+            }}
+            onClick={() => onHorizonChange(h)}
           >
-            {o.label}
+            {h}H
           </button>
         ))}
       </div>
 
       {!markets.length ? (
-        <div className="empty-state">
-          <div className="empty-icon">⏳</div>
-          <div className="empty-title">No expiring markets with suspicious activity</div>
-          <div className="empty-desc">
-            Try expanding the time horizon or running a scan first.
-          </div>
-        </div>
+        <div style={{ padding: "var(--space-6)", color: "var(--text-muted)", textAlign: "center", fontStyle: "italic" }}>No markets expiring in this window.</div>
       ) : (
-        <div className="expiring-grid">
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "var(--space-4)" }}>
           {markets.map((m, i) => (
-            <ExpiringCard key={m.market_id || i} market={m} />
-          ))}
-        </div>
-      )}
-    </>
-  );
-}
+            <div key={i} className="panel" style={{ padding: "var(--space-4)", backgroundColor: "var(--bg-app)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "var(--space-2)" }}>
+                <span className="badge amber" style={{ fontSize: "0.65rem" }}>{formatCountdown(m.hours_remaining)} LEFT</span>
+                <span className="mono" style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>${formatNum(m.volume)} VOL</span>
+              </div>
+              <div style={{ fontWeight: 500, fontSize: "0.85rem", marginBottom: "var(--space-4)", height: "2.8em", overflow: "hidden", lineHeight: 1.4 }}>
+                {m.question}
+              </div>
 
-function ExpiringCard({ market }) {
-  const m = market;
-  return (
-    <div className="expiring-card">
-      <div className="expiring-header">
-        <span className="expiring-question">{m.question}</span>
-        <div className="expiring-countdown">
-          <span className="countdown-value">{formatCountdown(m.hours_remaining)}</span>
-          <span className="countdown-label">remaining</span>
-        </div>
-      </div>
-
-      <div className="expiring-stats">
-        <div className="expiring-stat">
-          <span className="expiring-stat-label">Volume</span>
-          <span className="expiring-stat-value">{formatUSD(m.volume)}</span>
-        </div>
-        <div className="expiring-stat">
-          <span className="expiring-stat-label">Suspicious Trades</span>
-          <span className="expiring-stat-value" style={m.suspicious_trade_count > 0 ? { color: "var(--danger)" } : undefined}>
-            {m.suspicious_trade_count}
-          </span>
-        </div>
-        <div className="expiring-stat">
-          <span className="expiring-stat-label">Top Score</span>
-          <span className={`score-badge ${scoreClass(m.top_suspicion_score)}`} style={{ fontSize: "0.78rem" }}>
-            {m.top_suspicion_score?.toFixed(1) || "—"}
-          </span>
-        </div>
-      </div>
-
-      {m.flagged_wallets?.length > 0 && (
-        <div className="expiring-wallets">
-          {m.flagged_wallets.map((w) => (
-            <Link key={w} href={`/wallet/${w}`} className="wallet-chip">
-              {shortAddr(w)}
-            </Link>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: "0.75rem" }}>
+                <span style={{ color: "var(--text-muted)" }}>SUSPICIOUS TRADES</span>
+                <span className="mono" style={{ color: m.suspicious_trade_count > 0 ? "var(--signal-danger)" : "var(--text-main)", fontWeight: 700 }}>
+                  {m.suspicious_trade_count}
+                </span>
+              </div>
+            </div>
           ))}
         </div>
       )}
     </div>
-  );
-}
-
-/* ── Inline SVG icons ── */
-
-function ScanIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="10" />
-      <line x1="12" y1="8" x2="12" y2="12" />
-      <line x1="12" y1="16" x2="12.01" y2="16" />
-    </svg>
-  );
-}
-
-function AlertsIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
-    </svg>
-  );
-}
-
-function ClockIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="10" />
-      <polyline points="12 6 12 12 16 14" />
-    </svg>
   );
 }
