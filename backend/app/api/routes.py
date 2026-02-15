@@ -137,6 +137,7 @@ async def get_wallet(address: str):
             risk_score=wallet_row["risk_score"] if wallet_row else 0.0,
             analysis=analysis,
             categories=categories,
+            win_rate=analysis.get("win_rate", 0.0) if analysis else 0.0,
             alerts=[_row_to_alert(r) for r in alert_rows],
         )
     finally:

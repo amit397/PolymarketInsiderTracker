@@ -217,13 +217,13 @@ function AlertsFeed({ alerts, loading, expanded, onToggle }) {
                   </div>
                   <div style={{ marginTop: "var(--space-4)", textAlign: "right" }}>
                     <a
-                      href={`https://polymarket.com/event/${a.market_slug}`}
+                      href={`https://polymarket.com/search?q=${encodeURIComponent(a.market_question)}`}
                       target="_blank"
                       rel="noreferrer"
                       className="btn btn-outline"
                       style={{ fontSize: "0.7rem", padding: "4px 8px" }}
                     >
-                      View on Polymarket ↗
+                      Find on Polymarket ↗
                     </a>
                   </div>
                 </div>

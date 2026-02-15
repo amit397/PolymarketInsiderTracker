@@ -97,6 +97,7 @@ export default function WalletPage({ params }) {
                 <StatCard label="Total Trades" value={formatNum(wallet.total_trades)} />
                 <StatCard label="Volume Traded" value={formatUSD(wallet.total_volume)} />
                 <StatCard label="Flagged Alerts" value={formatNum(wallet.alerts?.length)} highlight={wallet.alerts?.length > 0} />
+                <StatCard label="Win Rate" value={(wallet.win_rate || 0).toFixed(0) + "%"} highlight={wallet.win_rate > 80} />
                 <StatCard label="Market Focus" value={Object.keys(wallet.categories || {}).length + " Topics"} />
             </div>
 

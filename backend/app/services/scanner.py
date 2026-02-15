@@ -32,6 +32,7 @@ from app.services.scoring import (
     compute_volume_anomaly,
     compute_wallet_freshness,
 )
+from app.services.pnl_calculator import PnLCalculator
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +49,7 @@ class Scanner:
         self.gamma = gamma or GammaClient()
         self.data = data or DataClient()
         self.polygonscan = polygonscan or PolygonscanClient()
+        self.pnl_calculator = PnLCalculator()
         self._owns_clients = gamma is None
 
     async def close(self) -> None:
@@ -429,6 +431,27 @@ class Scanner:
             if not scores:
                 return
 
+            # --- Win Rate Analysis ---
+            # Fetch market info for the markets traded to see if they are resolved
+            market_ids = list(market_trades.keys())
+            resolved_markets = {}
+            for mid in market_ids:
+                 # existing cache check is inside _get_market_info but it takes slug
+                 # we have conditionId (mid) here.
+                 # Gamma client has fetch_market_by_id. 
+                 # Let's add a helper or just use gamma directly if we have access.
+                 # self.gamma.fetch_market_by_id is available.
+                 try:
+                     m = await self.gamma.fetch_market_by_id(mid)
+                     if m:
+                         resolved_markets[mid] = m
+                 except Exception:
+                     pass
+            
+            pnl_stats = self.pnl_calculator.calculate_stats(history, resolved_markets)
+            win_rate = pnl_stats.get("win_rate", 0.0)
+            total_wins = pnl_stats.get("wins", 0)
+
             avg_score = statistics.mean(scores)
             max_score = max(scores)
             suspicious_count = sum(1 for s in scores if s > 50)
@@ -438,6 +461,8 @@ class Scanner:
                 "avg_score": round(avg_score, 2),
                 "max_score": round(max_score, 2),
                 "suspicious_trade_count": suspicious_count,
+                "win_rate": win_rate,
+                "total_wins": total_wins,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 

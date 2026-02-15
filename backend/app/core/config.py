@@ -33,11 +33,12 @@ POLYGONSCAN_API_KEY: str = os.getenv("POLYGONSCAN_API_KEY", "")
 # ---------------------------------------------------------------------------
 # Scoring weights  (must sum to 1.0)
 # ---------------------------------------------------------------------------
-WEIGHT_VOLUME_ANOMALY: float = 0.30
-WEIGHT_TOPIC_CONCENTRATION: float = 0.25
-WEIGHT_MARKET_TIMING: float = 0.20
-WEIGHT_WALLET_FRESHNESS: float = 0.15
-WEIGHT_RAPID_PROFIT: float = 0.10
+WEIGHT_VOLUME_ANOMALY: float = 0.25
+WEIGHT_TOPIC_CONCENTRATION: float = 0.20
+WEIGHT_MARKET_TIMING: float = 0.15
+WEIGHT_WALLET_FRESHNESS: float = 0.10
+WEIGHT_RAPID_PROFIT: float = 0.05
+WEIGHT_HISTORICAL_WIN_RATE: float = 0.25
 
 SCORING_WEIGHTS: dict[str, float] = {
     "volume_anomaly": WEIGHT_VOLUME_ANOMALY,
@@ -45,6 +46,7 @@ SCORING_WEIGHTS: dict[str, float] = {
     "market_timing": WEIGHT_MARKET_TIMING,
     "wallet_freshness": WEIGHT_WALLET_FRESHNESS,
     "rapid_profit": WEIGHT_RAPID_PROFIT,
+    "historical_win_rate": WEIGHT_HISTORICAL_WIN_RATE,
 }
 
 # ---------------------------------------------------------------------------

@@ -140,6 +140,7 @@ class ScoringResult:
     score: float = 0.0
     passes_gate: bool = False
     elevated_factors: list[str] = field(default_factory=list)
+    historical_win_rate: float = 0.0
 
     def to_dict(self) -> dict:
         return {
@@ -148,6 +149,7 @@ class ScoringResult:
             "market_timing": round(self.market_timing, 4),
             "wallet_freshness": round(self.wallet_freshness, 4),
             "rapid_profit": round(self.rapid_profit, 4),
+            "historical_win_rate": round(self.historical_win_rate, 4),
             "score": round(self.score, 2),
             "passes_gate": self.passes_gate,
             "elevated_factors": self.elevated_factors,
@@ -160,6 +162,7 @@ def compute_suspicion_score(
     market_timing: float,
     wallet_freshness: float,
     rapid_profit: float,
+    historical_win_rate: float = 0.0,
     weights: dict[str, float] | None = None,
 ) -> ScoringResult:
     """
@@ -175,6 +178,7 @@ def compute_suspicion_score(
         + w["market_timing"] * market_timing
         + w["wallet_freshness"] * wallet_freshness
         + w["rapid_profit"] * rapid_profit
+        + w.get("historical_win_rate", 0.0) * historical_win_rate
     )
     score = min(100.0, max(0.0, raw * 100.0))
 
@@ -184,6 +188,7 @@ def compute_suspicion_score(
         "market_timing": market_timing,
         "wallet_freshness": wallet_freshness,
         "rapid_profit": rapid_profit,
+        "historical_win_rate": historical_win_rate,
     }
     elevated = [
         name for name, val in factors.items() if val >= ALERT_FACTOR_THRESHOLD
@@ -196,6 +201,7 @@ def compute_suspicion_score(
         market_timing=market_timing,
         wallet_freshness=wallet_freshness,
         rapid_profit=rapid_profit,
+        historical_win_rate=historical_win_rate,
         score=score,
         passes_gate=passes,
         elevated_factors=elevated,

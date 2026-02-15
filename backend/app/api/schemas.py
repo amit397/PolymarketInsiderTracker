@@ -51,6 +51,7 @@ class WalletProfile(BaseModel):
     risk_score: float = 0.0
     analysis: dict | None = None
     categories: dict[str, float] = Field(default_factory=dict)
+    win_rate: float = 0.0
     alerts: list[AlertResponse] = Field(default_factory=list)
 
 
