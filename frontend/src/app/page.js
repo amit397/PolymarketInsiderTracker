@@ -186,20 +186,58 @@ function AlertsFeed({ alerts, loading, expanded, onToggle }) {
           <div className="alert-row" onClick={() => onToggle(a.id || i)}>
             <div className="alert-rank">{i + 1}</div>
             <div className="alert-info">
-              <span className="alert-market">{a.market_question || "Unknown market"}</span>
-              <Link
-                href={`/wallet/${a.wallet_address}`}
-                className="alert-wallet"
+              <a
+                href={`https://polymarket.com/event/${a.market_slug}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="alert-market"
                 onClick={(e) => e.stopPropagation()}
               >
-                {shortAddr(a.wallet_address)}
-              </Link>
+                {a.market_question || "Unknown market"}
+              </a>
+              <div className="alert-sub-row" style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "0.85rem", color: "var(--fg-muted)" }}>
+                <Link
+                  href={`/wallet/${a.wallet_address}`}
+                  className="alert-wallet"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {shortAddr(a.wallet_address)}
+                </Link>
+                {a.wallet_risk_score > 0 && (
+                  <span style={{
+                    fontSize: "0.75rem",
+                    padding: "1px 4px",
+                    borderRadius: 4,
+                    background: "var(--bg-elevated)",
+                    color: a.wallet_risk_score > 50 ? "var(--score-high)" : "var(--fg-muted)"
+                  }}>
+                    Risk: {a.wallet_risk_score.toFixed(0)}
+                  </span>
+                )}
+                <div className="external-links" style={{ display: "flex", gap: 4, marginLeft: 4 }}>
+                  <a href={`https://polymarket.com/profile/${a.wallet_address}`} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} style={{ opacity: 0.6 }}>PM</a>
+                  <a href={`https://polygonscan.com/address/${a.wallet_address}`} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} style={{ opacity: 0.6 }}>Scan</a>
+                </div>
+              </div>
             </div>
             <div className="alert-meta">
               <span className="alert-trade-size">
                 {a.trade_side === "BUY" ? "▲" : "▼"} {formatUSD(a.trade_size)}
               </span>
-              <span className="alert-time">{timeAgo(a.created_at)}</span>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span className="alert-time">{timeAgo(a.created_at)}</span>
+                {a.tx_hash && (
+                  <a
+                    href={`https://polygonscan.com/tx/${a.tx_hash}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => e.stopPropagation()}
+                    style={{ fontSize: "0.75rem", opacity: 0.6, textDecoration: "none" }}
+                  >
+                    Context ↗
+                  </a>
+                )}
+              </div>
             </div>
             <span className={`score-badge ${scoreClass(a.suspicion_score)}`}>
               {a.suspicion_score?.toFixed(1)}

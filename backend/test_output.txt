@@ -13,7 +13,7 @@ unset.
 At line:1 char:1
 + .\venv\Scripts\pytho
 n.exe -m pytest 
-tests\test_scoring.py 
+tests/test_scoring.py 
 -v --tb=sho ...
 + ~~~~~~~~~~~~~~~~~~~~
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -62,7 +62,7 @@ rootdir: C:\Users\User\Desktop\PolymarketInsiderTracker\backend
 configfile: pytest.ini
 plugins: anyio-4.12.1, asyncio-0.25.0
 asyncio: mode=Mode.AUTO, asyncio_default_fixture_loop_scope=None
-collecting ... collected 34 items
+collecting ... collected 35 items
 
 tests/test_scoring.py::TestVolumeAnomaly::test_normal_trade PASSED       [  2%]
 tests/test_scoring.py::TestVolumeAnomaly::test_large_outlier PASSED      [  5%]
@@ -71,26 +71,27 @@ tests/test_scoring.py::TestVolumeAnomaly::test_below_mean PASSED         [ 11%]
 tests/test_scoring.py::TestVolumeAnomaly::test_sigma_floor PASSED        [ 14%]
 tests/test_scoring.py::TestVolumeAnomaly::test_low_trade_count_fallback PASSED [ 17%]
 tests/test_scoring.py::TestVolumeAnomaly::test_low_trade_count_no_global PASSED [ 20%]
-tests/test_scoring.py::TestTopicConcentration::test_single_category PASSED [ 23%]
-tests/test_scoring.py::TestTopicConcentration::test_two_equal_categories PASSED [ 26%]
-tests/test_scoring.py::TestTopicConcentration::test_diversified PASSED   [ 29%]
-tests/test_scoring.py::TestTopicConcentration::test_empty PASSED         [ 32%]
-tests/test_scoring.py::TestMarketTiming::test_zero_hours PASSED          [ 35%]
-tests/test_scoring.py::TestMarketTiming::test_negative_hours PASSED      [ 38%]
-tests/test_scoring.py::TestMarketTiming::test_one_hour PASSED            [ 41%]
-tests/test_scoring.py::TestMarketTiming::test_24_hours PASSED            [ 44%]
-tests/test_scoring.py::TestMarketTiming::test_48_hours PASSED            [ 47%]
-tests/test_scoring.py::TestMarketTiming::test_168_hours PASSED           [ 50%]
-tests/test_scoring.py::TestMarketTiming::test_720_hours PASSED           [ 52%]
-tests/test_scoring.py::TestMarketTiming::test_beyond_max PASSED          [ 55%]
-tests/test_scoring.py::TestMarketTiming::test_monotonic_decrease PASSED  [ 58%]
-tests/test_scoring.py::TestWalletFreshness::test_brand_new PASSED        [ 61%]
-tests/test_scoring.py::TestWalletFreshness::test_one_year PASSED         [ 64%]
-tests/test_scoring.py::TestWalletFreshness::test_half_year PASSED        [ 67%]
-tests/test_scoring.py::TestWalletFreshness::test_very_old PASSED         [ 70%]
-tests/test_scoring.py::TestRapidProfit::test_buy_price_increase PASSED   [ 73%]
-tests/test_scoring.py::TestRapidProfit::test_buy_price_decrease PASSED   [ 76%]
-tests/test_scoring.py::TestRapidProfit::test_sell_price_decrease PASSED  [ 79%]
+tests/test_scoring.py::TestTopicConcentration::test_all_in_one_market PASSED [ 22%]
+tests/test_scoring.py::TestTopicConcentration::test_half_concentration PASSED [ 25%]
+tests/test_scoring.py::TestTopicConcentration::test_low_concentration PASSED [ 28%]
+tests/test_scoring.py::TestTopicConcentration::test_zero_total_volume PASSED [ 31%]
+tests/test_scoring.py::TestTopicConcentration::test_capped_at_one PASSED [ 34%]
+tests/test_scoring.py::TestMarketTiming::test_zero_hours PASSED          [ 37%]
+tests/test_scoring.py::TestMarketTiming::test_negative_hours PASSED      [ 40%]
+tests/test_scoring.py::TestMarketTiming::test_one_hour PASSED            [ 42%]
+tests/test_scoring.py::TestMarketTiming::test_24_hours PASSED            [ 45%]
+tests/test_scoring.py::TestMarketTiming::test_48_hours PASSED            [ 48%]
+tests/test_scoring.py::TestMarketTiming::test_168_hours PASSED           [ 51%]
+tests/test_scoring.py::TestMarketTiming::test_720_hours PASSED           [ 54%]
+tests/test_scoring.py::TestMarketTiming::test_beyond_max PASSED          [ 57%]
+tests/test_scoring.py::TestMarketTiming::test_monotonic_decrease PASSED  [ 60%]
+tests/test_scoring.py::TestWalletFreshness::test_brand_new PASSED        [ 62%]
+tests/test_scoring.py::TestWalletFreshness::test_one_year PASSED         [ 65%]
+tests/test_scoring.py::TestWalletFreshness::test_half_year PASSED        [ 68%]
+tests/test_scoring.py::TestWalletFreshness::test_very_old PASSED         [ 71%]
+tests/test_scoring.py::TestRapidProfit::test_buy_price_increase PASSED   [ 74%]
+tests/test_scoring.py::TestRapidProfit::test_buy_price_decrease PASSED   [ 77%]
+tests/test_scoring.py::TestRapidProfit::test_sell_price_decrease PASSED  [ 80%]
 tests/test_scoring.py::TestRapidProfit::test_moderate_move PASSED        [ 82%]
 tests/test_scoring.py::TestSuspicionScore::test_all_zeros PASSED         [ 85%]
 tests/test_scoring.py::TestSuspicionScore::test_all_ones PASSED          [ 88%]
@@ -99,4 +100,4 @@ tests/test_scoring.py::TestSuspicionScore::test_gate_requires_min_factors PASSED
 tests/test_scoring.py::TestSuspicionScore::test_typical_insider PASSED   [ 97%]
 tests/test_scoring.py::TestSuspicionScore::test_to_dict PASSED           [100%]
 
-============================= 34 passed in 0.05s ==============================
+============================= 35 passed in 0.04s ==============================

@@ -53,17 +53,23 @@ def compute_volume_anomaly(
     return min(1.0, max(0.0, z))
 
 
-def compute_topic_concentration(category_shares: dict[str, float]) -> float:
+def compute_topic_concentration(
+    market_volume: float,
+    total_wallet_volume: float,
+) -> float:
     """
-    N_C: Herfindahl–Hirschman Index over the wallet's category
-    distribution.  1 category → 1.0, perfectly diversified → ~0.
+    N_C: Single-market concentration ratio.
+
+    Measures what fraction of a wallet's total trading volume is
+    concentrated in the market being scored.  An insider wallet is
+    typically a single-purpose vehicle with near 100% of volume in
+    one market.
+
+    Returns 0.0–1.0  (1.0 = all volume in this market).
     """
-    if not category_shares:
+    if total_wallet_volume <= 0:
         return 0.0
-    total = sum(category_shares.values())
-    if total == 0:
-        return 0.0
-    return sum((v / total) ** 2 for v in category_shares.values())
+    return min(1.0, market_volume / total_wallet_volume)
 
 
 def compute_market_timing(hours_to_resolution: float) -> float:

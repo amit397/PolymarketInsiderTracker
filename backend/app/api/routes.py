@@ -57,6 +57,7 @@ def _row_to_alert(row) -> AlertResponse:
         factors=_parse_factors(row["factors_json"]),
         trade_size=row["trade_size"],
         trade_side=row["trade_side"],
+        tx_hash=row["tx_hash"],
         created_at=row["created_at"],
     )
 
@@ -120,12 +121,21 @@ async def get_wallet(address: str):
             except (json.JSONDecodeError, TypeError):
                 pass
 
+        analysis: dict | None = None
+        if wallet_row and wallet_row["analysis_json"]:
+            try:
+                analysis = json.loads(wallet_row["analysis_json"])
+            except (json.JSONDecodeError, TypeError):
+                pass
+
         return WalletProfile(
             address=address,
             username=wallet_row["username"] if wallet_row else None,
             first_seen=wallet_row["first_seen"] if wallet_row else None,
             total_trades=wallet_row["total_trades"] if wallet_row else 0,
             total_volume=wallet_row["total_volume"] if wallet_row else 0.0,
+            risk_score=wallet_row["risk_score"] if wallet_row else 0.0,
+            analysis=analysis,
             categories=categories,
             alerts=[_row_to_alert(r) for r in alert_rows],
         )

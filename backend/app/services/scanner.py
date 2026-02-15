@@ -13,10 +13,15 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any
 
-from app.core.config import SCAN_LOOKBACK_HOURS
+from app.core.config import (
+    MIN_TRADE_SIZE,
+    SCAN_LOOKBACK_HOURS,
+    WALLET_CONCENTRATION_THRESHOLD,
+)
 from app.core.database import get_db
 from app.services.data_client import DataClient
 from app.services.gamma_client import GammaClient
+from app.services.market_classifier import classify_market
 from app.services.polygonscan import PolygonscanClient
 from app.services.scoring import (
     ScoringResult,
@@ -63,42 +68,121 @@ class Scanner:
         Scan recent trades, score each unique wallet, and persist
         alerts for wallets that pass the alert gate.
 
+        Filters applied:
+          1. Market type — skip crypto-price, sports, entertainment
+          2. Trade size — skip trades under MIN_TRADE_SIZE ($1,000)
+          3. Wallet concentration — only flag wallets with ≥85%
+             volume in the scored market
+
         Returns a list of alert dicts for the trades processed.
         """
         since_ts = int(time.time()) - (lookback_hours * 3600)
         logger.info("Starting scan – trades since %s", since_ts)
 
         # 1. Fetch recent trades
+        # 1. Fetch recent trades
         trades = await self.data.fetch_recent_trades(since_ts)
-        logger.info("Fetched %d recent trades", len(trades))
+        logger.info("Fetched %d raw trades", len(trades))
+
+        # Sanitize types (API sometimes returns strings)
+        for t in trades:
+            try:
+                t["size"] = float(t.get("size", 0))
+                t["price"] = float(t.get("price", 0))
+            except (ValueError, TypeError):
+                t["size"] = 0.0
+                t["price"] = 0.0
 
         if not trades:
             return []
 
-        # 2. Group by wallet
-        wallet_trades: dict[str, list[dict]] = defaultdict(list)
+        # 1b. Dedup: skip trades already processed (by tx_hash)
+        seen_hashes = await self._get_seen_tx_hashes()
+        before_dedup = len(trades)
+        trades = [
+            t for t in trades
+            if t.get("transactionHash") and t["transactionHash"] not in seen_hashes
+        ]
+        logger.info(
+            "After dedup: %d / %d trades are new",
+            len(trades), before_dedup,
+        )
+        if not trades:
+            logger.info("No new trades – scan cycle complete")
+            return []
+
+        # 2. Filter: market type (skip crypto/sports/entertainment)
+        filtered_trades: list[dict] = []
+        skipped_counts: dict[str, int] = defaultdict(int)
         for trade in trades:
+            slug = trade.get("slug", "")
+            title = trade.get("title", "")
+            cls = classify_market(slug, title)
+            if cls.should_scan:
+                filtered_trades.append(trade)
+            else:
+                skipped_counts[cls.category] += 1
+
+        for cat, cnt in skipped_counts.items():
+            logger.info("Skipped %d trades (market type: %s)", cnt, cat)
+        logger.info(
+            "After market-type filter: %d / %d trades remain",
+            len(filtered_trades), len(trades),
+        )
+
+        # 3. Filter: minimum trade size
+        size_before = len(filtered_trades)
+        filtered_trades = [
+            t for t in filtered_trades
+            if t.get("size", 0) >= MIN_TRADE_SIZE
+        ]
+        logger.info(
+            "After min-size filter ($%.0f): %d / %d trades remain",
+            MIN_TRADE_SIZE, len(filtered_trades), size_before,
+        )
+
+        if not filtered_trades:
+            logger.info("No trades passed filters – scan complete")
+            return []
+
+        # 4. Group by wallet
+        wallet_trades: dict[str, list[dict]] = defaultdict(list)
+        for trade in filtered_trades:
             wallet = trade.get("proxyWallet", "")
             if wallet:
                 wallet_trades[wallet].append(trade)
 
-        # 3. Compute global trade stats (fallback for low-trade markets)
-        all_sizes = [t.get("size", 0) for t in trades if t.get("size", 0) > 0]
+        # 5. Compute global trade stats (fallback for low-trade markets)
+        all_sizes = [t.get("size", 0) for t in filtered_trades if t.get("size", 0) > 0]
         global_mean = statistics.mean(all_sizes) if all_sizes else 0.0
         global_std = statistics.stdev(all_sizes) if len(all_sizes) > 1 else 1.0
 
-        # 4. Group full trade dicts by market (conditionId)
+        # 6. Group full trade dicts by market (conditionId)
         market_trades: dict[str, list[dict]] = defaultdict(list)
-        for trade in trades:
+        for trade in filtered_trades:
             cid = trade.get("conditionId", "")
             if cid:
                 market_trades[cid].append(trade)
 
-        # 5. Score each wallet
+        # 7. Score each wallet + check concentration
         alerts: list[dict[str, Any]] = []
+        concentration_skipped = 0
 
         for wallet, w_trades in wallet_trades.items():
             for trade in w_trades:
+                # Compute wallet's concentration in this market
+                condition_id = trade.get("conditionId", "")
+                market_vol = sum(
+                    t.get("size", 0) for t in w_trades
+                    if t.get("conditionId", "") == condition_id
+                )
+                total_vol = sum(t.get("size", 0) for t in w_trades)
+                concentration = market_vol / total_vol if total_vol > 0 else 0
+
+                if concentration < WALLET_CONCENTRATION_THRESHOLD:
+                    concentration_skipped += 1
+                    continue
+
                 result = await self._score_trade(
                     wallet=wallet,
                     trade=trade,
@@ -106,6 +190,8 @@ class Scanner:
                     market_trades=market_trades,
                     global_mean=global_mean,
                     global_std=global_std,
+                    market_volume=market_vol,
+                    total_wallet_volume=total_vol,
                 )
 
                 if result.passes_gate:
@@ -115,6 +201,15 @@ class Scanner:
                         result=result,
                     )
                     alerts.append(alert)
+
+        if concentration_skipped:
+            logger.info(
+                "Skipped %d trades (wallet concentration < %.0f%%)",
+                concentration_skipped, WALLET_CONCENTRATION_THRESHOLD * 100,
+            )
+
+        # 8. Save all processed trade hashes so we never re-score them
+        await self._save_processed_trades(filtered_trades)
 
         logger.info("Scan complete – %d alerts generated", len(alerts))
         return alerts
@@ -128,9 +223,11 @@ class Scanner:
         wallet: str,
         trade: dict[str, Any],
         all_wallet_trades: list[dict[str, Any]],
-        market_trades: dict[str, list[float]],
+        market_trades: dict[str, list[dict]],
         global_mean: float,
         global_std: float,
+        market_volume: float = 0.0,
+        total_wallet_volume: float = 0.0,
     ) -> ScoringResult:
         """Score a single trade for a wallet."""
 
@@ -156,12 +253,8 @@ class Scanner:
             global_std=global_std,
         )
 
-        # --- N_C: Topic Concentration ---
-        category_counts: dict[str, float] = defaultdict(float)
-        for t in all_wallet_trades:
-            slug = t.get("eventSlug", t.get("slug", "unknown"))
-            category_counts[slug] += t.get("size", 0)
-        nc = compute_topic_concentration(dict(category_counts))
+        # --- N_C: Single-market concentration ---
+        nc = compute_topic_concentration(market_volume, total_wallet_volume)
 
         # --- N_M: Market Timing ---
         nm = 0.0
@@ -233,8 +326,139 @@ class Scanner:
             return None
 
     # ------------------------------------------------------------------
+    # Trade deduplication
+    # ------------------------------------------------------------------
+
+    async def _get_seen_tx_hashes(self) -> set[str]:
+        """Return the set of tx_hashes already stored in the trades table."""
+        db = await get_db()
+        try:
+            cursor = await db.execute("SELECT tx_hash FROM trades WHERE tx_hash IS NOT NULL")
+            rows = await cursor.fetchall()
+            return {row[0] for row in rows}
+        finally:
+            await db.close()
+
+    async def _save_processed_trades(self, trades: list[dict[str, Any]]) -> None:
+        """Persist processed trades so they are skipped in future cycles."""
+        if not trades:
+            return
+        db = await get_db()
+        try:
+            await db.executemany(
+                """
+                INSERT OR IGNORE INTO trades
+                    (condition_id, market_slug, proxy_wallet, side, size,
+                     price, outcome, timestamp, tx_hash, market_question)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        t.get("conditionId", ""),
+                        t.get("slug", ""),
+                        t.get("proxyWallet", ""),
+                        t.get("side", ""),
+                        t.get("size", 0),
+                        t.get("price", 0),
+                        t.get("outcome", ""),
+                        t.get("timestamp", 0),
+                        t.get("transactionHash", ""),
+                        t.get("title", ""),
+                    )
+                    for t in trades
+                    if t.get("transactionHash")
+                ],
+            )
+            await db.commit()
+            logger.info("Saved %d processed trades to DB", len(trades))
+        finally:
+            await db.close()
+
+    # ------------------------------------------------------------------
     # Persistence
     # ------------------------------------------------------------------
+
+    async def _deep_analyze_wallet(self, wallet: str) -> None:
+        """
+        Fetch history, score each trade, and update wallet risk profile.
+        Used for deeper analysis after an alert is triggered.
+        """
+        try:
+            # Fetch last ~200 trades (max_pages=2) for context
+            history = await self.data.fetch_wallet_trades(wallet, max_pages=2)
+            if not history:
+                return
+
+            # Sanitize types (same as run_scan)
+            for t in history:
+                try:
+                    t["size"] = float(t.get("size", 0))
+                    t["price"] = float(t.get("price", 0))
+                except (ValueError, TypeError):
+                    t["size"] = 0.0
+                    t["price"] = 0.0
+
+            # Group for context
+            market_trades = defaultdict(list)
+            for t in history:
+                market_trades[t.get("conditionId", "")].append(t)
+            
+            total_vol = sum(t["size"] for t in history)
+            scores = []
+
+            for t in history:
+                cid = t.get("conditionId", "")
+                market_vol = sum(x["size"] for x in history if x.get("conditionId") == cid)
+                
+                # Reuse scoring logic
+                # Lacking full market context, we pass simplified global/market stats.
+                # N_V will be conservative (1.0) for sparse history.
+                # N_C and N_M will be accurate.
+                res = await self._score_trade(
+                    wallet=wallet,
+                    trade=t,
+                    all_wallet_trades=history,
+                    market_trades=market_trades,
+                    global_mean=0,
+                    global_std=1,
+                    market_volume=market_vol,
+                    total_wallet_volume=total_vol,
+                )
+                scores.append(res.score)
+
+            if not scores:
+                return
+
+            avg_score = statistics.mean(scores)
+            max_score = max(scores)
+            suspicious_count = sum(1 for s in scores if s > 50)
+            
+            analysis = {
+                "trades_analyzed": len(history),
+                "avg_score": round(avg_score, 2),
+                "max_score": round(max_score, 2),
+                "suspicious_trade_count": suspicious_count,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+
+            # Update DB
+            db = await get_db()
+            try:
+                await db.execute(
+                    """
+                    UPDATE wallets 
+                    SET risk_score = ?, analysis_json = ? 
+                    WHERE address = ?
+                    """,
+                    (avg_score, json.dumps(analysis), wallet),
+                )
+                await db.commit()
+                logger.info("Deep analysis for %s: risk_score=%.1f", wallet, avg_score)
+            finally:
+                await db.close()
+
+        except Exception as e:
+            logger.error("Deep analysis failed for %s: %s", wallet, e)
 
     async def _persist_alert(
         self,
@@ -254,6 +478,7 @@ class Scanner:
             "market_end_date": None,
             "trade_size": trade.get("size", 0),
             "trade_side": trade.get("side", ""),
+            "tx_hash": trade.get("transactionHash", ""),
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
 
@@ -278,8 +503,8 @@ class Scanner:
                 INSERT INTO alerts
                     (wallet_address, market_id, condition_id, suspicion_score,
                      factors_json, market_question, market_slug, market_end_date,
-                     trade_size, trade_side, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     trade_size, trade_side, tx_hash, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     alert["wallet_address"],
@@ -292,11 +517,16 @@ class Scanner:
                     alert["market_end_date"],
                     alert["trade_size"],
                     alert["trade_side"],
+                    alert["tx_hash"],
                     alert["created_at"],
                 ),
             )
             await db.commit()
         finally:
             await db.close()
+
+        # Trigger deep dive analysis
+        # (This adds latency but ensures profile is updated immediately)
+        await self._deep_analyze_wallet(wallet)
 
         return alert

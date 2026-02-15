@@ -33,6 +33,8 @@ class AlertResponse(BaseModel):
     factors: FactorBreakdown
     trade_size: float | None = None
     trade_side: str | None = None
+    tx_hash: str | None = None
+    wallet_risk_score: float = 0.0
     created_at: str
 
 
@@ -46,6 +48,8 @@ class WalletProfile(BaseModel):
     first_seen: int | None = None
     total_trades: int = 0
     total_volume: float = 0.0
+    risk_score: float = 0.0
+    analysis: dict | None = None
     categories: dict[str, float] = Field(default_factory=dict)
     alerts: list[AlertResponse] = Field(default_factory=list)
 

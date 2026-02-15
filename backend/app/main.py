@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import router
 from app.core.database import init_db
+from app.services.scan_loop import scan_loop
 
 logging.basicConfig(
     level=logging.INFO,
@@ -22,7 +23,9 @@ async def lifespan(application: FastAPI):
     """Startup / shutdown lifecycle."""
     await init_db()
     logging.getLogger(__name__).info("Database initialised")
+    scan_loop.start()
     yield
+    await scan_loop.stop()
 
 
 app = FastAPI(

@@ -11,6 +11,7 @@ from app.core.config import (
     DATA_API_BASE,
     DATA_API_PAGE_SIZE,
     HTTP_TIMEOUT,
+    SCAN_MAX_PAGES,
 )
 
 logger = logging.getLogger(__name__)
@@ -152,7 +153,7 @@ class DataClient:
         self,
         since_timestamp: int,
         *,
-        max_pages: int = 10,
+        max_pages: int = SCAN_MAX_PAGES,
     ) -> list[dict[str, Any]]:
         """
         Fetch all trades since *since_timestamp* (unix epoch).

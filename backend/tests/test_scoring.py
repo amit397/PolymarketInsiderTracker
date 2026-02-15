@@ -62,21 +62,26 @@ class TestVolumeAnomaly:
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 class TestTopicConcentration:
-    def test_single_category(self):
-        """All bets in one category → 1.0."""
-        assert compute_topic_concentration({"politics": 100.0}) == 1.0
+    def test_all_in_one_market(self):
+        """All volume in one market → 1.0."""
+        assert compute_topic_concentration(5000.0, 5000.0) == 1.0
 
-    def test_two_equal_categories(self):
-        """Two equal categories → 0.5."""
-        assert compute_topic_concentration({"a": 50, "b": 50}) == 0.5
+    def test_half_concentration(self):
+        """Half of volume in this market → 0.5."""
+        assert compute_topic_concentration(2500.0, 5000.0) == 0.5
 
-    def test_diversified(self):
-        """Many categories → low score."""
-        cats = {f"cat_{i}": 10.0 for i in range(10)}
-        assert compute_topic_concentration(cats) < 0.2
+    def test_low_concentration(self):
+        """Small fraction → low score."""
+        score = compute_topic_concentration(500.0, 5000.0)
+        assert score == pytest.approx(0.1)
 
-    def test_empty(self):
-        assert compute_topic_concentration({}) == 0.0
+    def test_zero_total_volume(self):
+        """Zero total volume → 0.0."""
+        assert compute_topic_concentration(100.0, 0.0) == 0.0
+
+    def test_capped_at_one(self):
+        """Should not exceed 1.0 even if market > total (edge case)."""
+        assert compute_topic_concentration(6000.0, 5000.0) == 1.0
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

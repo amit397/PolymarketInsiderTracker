@@ -44,7 +44,9 @@ CREATE TABLE IF NOT EXISTS wallets (
     total_trades     INTEGER DEFAULT 0,
     total_volume     REAL DEFAULT 0,
     categories_json  TEXT DEFAULT '{}',
-    last_scanned     TEXT
+    last_scanned     TEXT,
+    risk_score       REAL DEFAULT 0,
+    analysis_json    TEXT DEFAULT '{}'
 );
 
 CREATE TABLE IF NOT EXISTS alerts (
@@ -59,6 +61,7 @@ CREATE TABLE IF NOT EXISTS alerts (
     market_end_date  TEXT,
     trade_size       REAL,
     trade_side       TEXT,
+    tx_hash          TEXT,
     created_at       TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (wallet_address) REFERENCES wallets(address)
 );

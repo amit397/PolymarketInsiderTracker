@@ -1,0 +1,55 @@
+﻿=== CLOB API: /trades endpoint ===
+Status: 401
+Body: {"error":"Unauthorized/Invalid api key"}
+
+
+=== Gamma API: Event-based markets ===
+Got 10 markets
+  slug: will-trump-deport-less-than-250000
+  question: Will Trump deport less than 250,000?
+  volume: 1150443.570962
+  endDate: 2025-12-31T12:00:00Z
+  clobTokenIds: ["
+  conditionId: 0xaf9d0e448129a9f657f851d49495
+
+  slug: will-trump-deport-250000-500000-people
+  question: Will Trump deport 250,000-500,000 people?
+  volume: 6229419.618507
+  endDate: 2025-12-31T12:00:00Z
+  clobTokenIds: ["
+  conditionId: 0x49686d26fb712515cd5e12c23f0a
+
+  slug: will-trump-deport-500000-750000-people
+  question: Will Trump deport 500,000-750,000- people?
+  volume: 512154.905136
+  endDate: 2025-12-31T12:00:00Z
+  clobTokenIds: ["
+  conditionId: 0x2393ed0b0fdc450054c7b9071907
+
+  slug: will-trump-deport-750000-1000000-people
+  question: Will Trump deport 750,000-1,000,000 people?
+  volume: 498737.336297
+  endDate: 2025-12-31T12:00:00Z
+  clobTokenIds: ["
+  conditionId: 0x44f08744458b8896620cd3330bc5
+
+  slug: will-trump-deport-1000000-1250000-people
+  question: Will Trump deport 1,000,000-1,250,000 people?
+  volume: 494357.713089
+  endDate: 2025-12-31T12:00:00Z
+  clobTokenIds: ["
+  conditionId: 0x49a20c7523c271099008f3ef9a31
+
+
+=== Data API: conditionId filter test ===
+Testing conditionId: 0xaf9d0e448129a9f657f851d49495ba4742055d...
+Market slug: will-trump-deport-less-than-250000
+Trades returned: 10
+Unique conditionIds in response: 9
+Matching our filter: 0/10
+
+=== Data API: /activity endpoint ===
+Status: 400
+
+=== Data API: /markets endpoint ===
+Status: 404

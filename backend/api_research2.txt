@@ -1,0 +1,38 @@
+﻿=== Pagination limits ===
+  Offset 1000: 100 trades, oldest_ts=1771120415
+  Offset 2000: 100 trades, oldest_ts=1771120393
+  Offset 3000: 100 trades, oldest_ts=1771120593
+
+=== Market diversity in global feed ===
+Total trades fetched: 2000
+Unique conditionIds (markets): 305
+Unique wallets: 826
+
+=== Top 10 markets by trade count ===
+   416 trades | btc-updown-5m-1771120500
+   344 trades | btc-updown-5m-1771120200
+   230 trades | btc-updown-15m-1771119900
+    63 trades | xrp-up-or-down-february-14-8pm-et
+    61 trades | eth-updown-15m-1771119900
+    59 trades | solana-up-or-down-february-14-8pm-et
+    57 trades | xrp-updown-15m-1771119900
+    47 trades | bitcoin-up-or-down-february-14-8pm-et
+    41 trades | cbb-txtech-arz-2026-02-14
+    20 trades | cbb-tulsa-wichst-2026-02-14
+
+=== Event-based markets (non-crypto/sports/entertainment) ===
+    63 trades,  21 wallets | XRP Up or Down - February 14, 8PM ET
+    59 trades,  19 wallets | Solana Up or Down - February 14, 8PM ET
+    57 trades,  31 wallets | XRP Up or Down - February 14, 8:45PM-9:00PM ET
+    15 trades,  12 wallets | Solana Up or Down - February 14, 8:45PM-9:00PM ET
+    15 trades,   1 wallets | Will CD Guadalajara win on 2026-02-14?
+     8 trades,   5 wallets | Will Bitcoin dip to $40,000 in February?
+     7 trades,   4 wallets | Will DeepSeek have the best AI model at the end of February 2026?
+     6 trades,   3 wallets | Will Bitcoin dip to $35,000 in February?
+     6 trades,   3 wallets | Solana Up or Down - February 15, 4AM ET
+     5 trades,   4 wallets | Will Lewis Hamilton be the 2026 F1 Drivers' Champion?
+     5 trades,   3 wallets | Will Moonshot have the best AI model at the end of February 2026?
+     5 trades,   2 wallets | Will the highest temperature in London be 11░C on February 15?
+     5 trades,   5 wallets | Dallas Open: Denis Shapovalov vs Ben Shelton
+     5 trades,   4 wallets | Will the US next strike Iran on February 15, 2026 (ET)?
+     5 trades,   3 wallets | Will the highest temperature in Seoul be 7░C on February 15?

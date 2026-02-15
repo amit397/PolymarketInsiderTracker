@@ -83,3 +83,7 @@ DATA_API_PAGE_SIZE: int = 100
 # Scanner
 # ---------------------------------------------------------------------------
 SCAN_LOOKBACK_HOURS: int = 24  # default: scan trades from last 24 h
+SCAN_INTERVAL_SECONDS: int = 60  # pause between background scan cycles
+SCAN_MAX_PAGES: int = 30  # pages per cycle (100 trades/page → 3000 trades)
+MIN_TRADE_SIZE: float = 10000.0  # skip trades under $10,000
+WALLET_CONCENTRATION_THRESHOLD: float = 0.85  # 85% of volume in one market
