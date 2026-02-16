@@ -47,6 +47,7 @@ class PolygonscanClient:
                 PolygonscanClient._warned_no_key = True
             return None
 
+        # Try using the official API (via httpx)
         try:
             resp = await self._client.get(
                 "",
@@ -66,6 +67,9 @@ class PolygonscanClient:
             data: dict[str, Any] = resp.json()
 
             if data.get("status") != "1" or not data.get("result"):
+                # "No transactions found" is a valid result (age=0)
+                if data.get("message") == "No transactions found":
+                    return 0.0
                 return None
 
             first_tx = data["result"][0]

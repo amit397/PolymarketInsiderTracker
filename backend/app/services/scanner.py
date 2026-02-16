@@ -5,6 +5,7 @@ and generates alerts.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import statistics
@@ -37,6 +38,8 @@ from app.services.pnl_calculator import PnLCalculator
 logger = logging.getLogger(__name__)
 
 
+from app.core.monitor import monitor
+
 class Scanner:
     """Main scanning orchestrator."""
 
@@ -57,6 +60,77 @@ class Scanner:
             await self.gamma.close()
             await self.data.close()
             await self.polygonscan.close()
+
+    # ------------------------------------------------------------------
+    # Historical Scan (Whale Watching)
+    # ------------------------------------------------------------------
+
+    async def scan_history(
+        self,
+        lookback_pages: int = 1000,
+        min_size: float = 10000.0,
+    ) -> int:
+        """
+        Backfill trades by scanning backwards in the global feed.
+        Filters for large trades only to populate the database with "whales".
+        Returns number of trades saved.
+        """
+        monitor.update("Running Historical Scan", stats={"pages": lookback_pages})
+        logger.info(
+            "Starting historical whale scan (pages=%d, min_size=%.0f)",
+            lookback_pages, min_size
+        )
+        
+        seen_hashes = await self._get_seen_tx_hashes()
+        total_saved = 0
+        batch_size = 100
+        
+        for page in range(lookback_pages):
+            # Fetch batch
+            try:
+                trades = await self.data.fetch_trades(
+                    limit=batch_size, 
+                    offset=page * batch_size
+                )
+            except Exception as e:
+                logger.error("Failed to fetch historical page %d: %s", page, e)
+                # Don't abort, just skip
+                continue
+            
+            if not trades:
+                logger.info("Historical scan ended early at page %d (no data)", page)
+                break
+                
+            # Filter
+            valid_trades = []
+            for t in trades:
+                # Sanitize
+                try:
+                    size = float(t.get("size", 0))
+                    t["size"] = size
+                except (ValueError, TypeError):
+                    t["size"] = 0.0
+                    
+                # Check size and dedup
+                if t["size"] >= min_size:
+                     tx = t.get("transactionHash")
+                     if tx and tx not in seen_hashes:
+                         valid_trades.append(t)
+                         seen_hashes.add(tx) # update local set
+            
+            # Save
+            if valid_trades:
+                await self._save_processed_trades(valid_trades)
+                total_saved += len(valid_trades)
+                
+            # Progress log every 10 pages
+            if page % 10 == 0:
+                monitor.update("Historical Scan", stats={"page": page, "total_saved": total_saved})
+                logger.info("Historical scan: Page %d/%d, Saved %d so far", page, lookback_pages, total_saved)
+                await asyncio.sleep(0.1)
+                
+        logger.info("Historical scan complete. Total NEW trades saved: %d", total_saved)
+        return total_saved
 
     # ------------------------------------------------------------------
     # Main scan entry point
@@ -80,6 +154,7 @@ class Scanner:
         """
         since_ts = int(time.time()) - (lookback_hours * 3600)
         logger.info("Starting scan – trades since %s", since_ts)
+        monitor.update("Fetching Recent Trades", stats={"lookback_hours": lookback_hours})
 
         # 1. Fetch recent trades
         # 1. Fetch recent trades
@@ -166,140 +241,22 @@ class Scanner:
             if cid:
                 market_trades[cid].append(trade)
 
-        # 7. Score each wallet + check concentration
-        alerts: list[dict[str, Any]] = []
-        concentration_skipped = 0
+        # 7. (Removed) Scoring is now handled by AccountAnalyzer
+        # We only save the trades here.
 
-        for wallet, w_trades in wallet_trades.items():
-            for trade in w_trades:
-                # Compute wallet's concentration in this market
-                condition_id = trade.get("conditionId", "")
-                market_vol = sum(
-                    t.get("size", 0) for t in w_trades
-                    if t.get("conditionId", "") == condition_id
-                )
-                total_vol = sum(t.get("size", 0) for t in w_trades)
-                concentration = market_vol / total_vol if total_vol > 0 else 0
-
-                if concentration < WALLET_CONCENTRATION_THRESHOLD:
-                    concentration_skipped += 1
-                    continue
-
-                result = await self._score_trade(
-                    wallet=wallet,
-                    trade=trade,
-                    all_wallet_trades=w_trades,
-                    market_trades=market_trades,
-                    global_mean=global_mean,
-                    global_std=global_std,
-                    market_volume=market_vol,
-                    total_wallet_volume=total_vol,
-                )
-
-                if result.passes_gate:
-                    alert = await self._persist_alert(
-                        wallet=wallet,
-                        trade=trade,
-                        result=result,
-                    )
-                    alerts.append(alert)
-
-        if concentration_skipped:
-            logger.info(
-                "Skipped %d trades (wallet concentration < %.0f%%)",
-                concentration_skipped, WALLET_CONCENTRATION_THRESHOLD * 100,
-            )
-
-        # 8. Save all processed trade hashes so we never re-score them
+        # 8. Save all processed trade hashes
         await self._save_processed_trades(filtered_trades)
 
-        logger.info("Scan complete – %d alerts generated", len(alerts))
-        return alerts
+        logger.info("Ingestion complete – %d trades saved", len(filtered_trades))
+        # Return empty list as we don't generate alerts here anymore
+        return []
 
     # ------------------------------------------------------------------
-    # Per-trade scoring
+    # Per-trade scoring (Deprecated/Removed)
     # ------------------------------------------------------------------
-
-    async def _score_trade(
-        self,
-        wallet: str,
-        trade: dict[str, Any],
-        all_wallet_trades: list[dict[str, Any]],
-        market_trades: dict[str, list[dict]],
-        global_mean: float,
-        global_std: float,
-        market_volume: float = 0.0,
-        total_wallet_volume: float = 0.0,
-    ) -> ScoringResult:
-        """Score a single trade for a wallet."""
-
-        trade_size = trade.get("size", 0)
-        condition_id = trade.get("conditionId", "")
-        trade_ts = trade.get("timestamp", 0)
-        trade_price = trade.get("price", 0)
-        trade_side = trade.get("side", "BUY")
-
-        # --- N_V: Volume Anomaly ---
-        m_trade_list = market_trades.get(condition_id, [])
-        m_sizes = [t.get("size", 0) for t in m_trade_list if t.get("size", 0) > 0]
-        m_count = len(m_sizes)
-        m_mean = statistics.mean(m_sizes) if m_sizes else 0.0
-        m_std = statistics.stdev(m_sizes) if len(m_sizes) > 1 else 0.0
-
-        nv = compute_volume_anomaly(
-            trade_size=trade_size,
-            market_mean=m_mean,
-            market_std=m_std,
-            market_trade_count=m_count,
-            global_mean=global_mean,
-            global_std=global_std,
-        )
-
-        # --- N_C: Single-market concentration ---
-        nc = compute_topic_concentration(market_volume, total_wallet_volume)
-
-        # --- N_M: Market Timing ---
-        nm = 0.0
-        market_info = await self._get_market_info(trade.get("slug", ""))
-        if market_info and market_info.get("endDate"):
-            try:
-                end_dt = datetime.fromisoformat(
-                    market_info["endDate"].replace("Z", "+00:00")
-                )
-                trade_dt = datetime.fromtimestamp(trade_ts, tz=timezone.utc)
-                hours_to_res = max(0, (end_dt - trade_dt).total_seconds() / 3600)
-                nm = compute_market_timing(hours_to_res)
-            except (ValueError, TypeError):
-                pass
-
-        # --- N_F: Wallet Freshness ---
-        nf = 0.0
-        age_days = await self.polygonscan.fetch_wallet_age_days(wallet)
-        if age_days is not None:
-            nf = compute_wallet_freshness(age_days)
-
-        # --- N_R: Rapid Profit ---
-        # Use subsequent trades in the same market as price proxy
-        nr = 0.0
-        subsequent_prices = [
-            float(t.get("price", 0))
-            for t in m_trade_list
-            if isinstance(t, dict)
-            and t.get("timestamp", 0) > trade_ts
-            and t.get("price", 0)
-        ]
-        if subsequent_prices and trade_price:
-            price_after = subsequent_prices[-1]
-            nr = compute_rapid_profit(float(trade_price), price_after, trade_side)
-
-        # --- Compute final score ---
-        return compute_suspicion_score(
-            volume_anomaly=nv,
-            topic_concentration=nc,
-            market_timing=nm,
-            wallet_freshness=nf,
-            rapid_profit=nr,
-        )
+    # The logic has been moved to AccountAnalyzer. 
+    # This method is kept as a placeholder or can be removed.
+    # For now, we remove it to avoid confusion.
 
     # ------------------------------------------------------------------
     # Market info cache

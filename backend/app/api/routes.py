@@ -20,6 +20,8 @@ from app.api.schemas import (
 from app.core.database import get_db
 from app.services.gamma_client import GammaClient
 from app.services.scanner import Scanner
+from app.core.monitor import monitor # Import Monitor
+from app.services.scan_loop import scan_loop # Import ScanLoop
 
 router = APIRouter(prefix="/api")
 
@@ -287,6 +289,7 @@ async def get_expiring_markets(
                     top_suspicion_score=round(top_score, 2),
                     flagged_wallets=flagged[:10],
                     image=market.get("image"),
+                    event_slug=market.get("eventSlug"),
                 )
             )
     finally:
@@ -340,19 +343,144 @@ async def get_stats():
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# GET /api/insiders
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@router.get("/insiders", response_model=list[WalletProfile])
+async def get_insiders(
+    limit: int = Query(default=50, ge=1, le=100),
+    min_score: float = Query(default=50, ge=0, le=100),
+):
+    """
+    Get top insider accounts ranked by risk score.
+    """
+    db = await get_db()
+    try:
+        # Fetch wallets with high risk score
+        cursor = await db.execute(
+            """
+            SELECT * FROM wallets 
+            WHERE risk_score >= ? 
+            ORDER BY risk_score DESC, total_profit DESC 
+            LIMIT ?
+            """,
+            (min_score, limit)
+        )
+        rows = await cursor.fetchall()
+        
+        profiles = []
+        for row in rows:
+            analysis = {}
+            if row["analysis_json"]:
+                try:
+                    analysis = json.loads(row["analysis_json"])
+                except:
+                    pass
+            
+            categories = {}
+            if row["categories_json"]:
+                try:
+                    categories = json.loads(row["categories_json"])
+                except:
+                    pass
+
+            # We don't fetch alerts for the list view to stay light
+            profiles.append(
+                WalletProfile(
+                    address=row["address"],
+                    username=row["username"],
+                    first_seen=row["first_seen"],
+                    total_trades=row["total_trades"],
+                    total_volume=row["total_volume"],
+                    risk_score=row["risk_score"],
+                    analysis=analysis,
+                    categories=categories,
+                    win_rate=analysis.get("win_rate", 0.0),
+                    alerts=[] 
+                )
+            )
+        return profiles
+    finally:
+        await db.close()
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # POST /api/scan
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 @router.post("/scan", response_model=ScanResponse)
 async def trigger_scan(body: ScanRequest | None = None):
-    """Trigger a manual scan for suspicious activity."""
+    """Trigger a manual scan (ingest + analyze)."""
     lookback = body.lookback_hours if body else 24
     scanner = Scanner()
+    from app.services.account_analyzer import AccountAnalyzer
+    analyzer = AccountAnalyzer(data=scanner.data, gamma=scanner.gamma, polygonscan=scanner.polygonscan)
+    
     try:
-        alerts = await scanner.run_scan(lookback_hours=lookback)
+        # 1. Ingest
+        await scanner.run_scan(lookback_hours=lookback)
+        
+        # 2. Analyze
+        await analyzer.analyze_all_wallets()
+        
         return ScanResponse(
-            alerts_generated=len(alerts),
-            message=f"Scan complete – {len(alerts)} alerts generated",
+            alerts_generated=0, # Deprecated
+            message="Scan and analysis triggered successfully",
         )
     finally:
         await scanner.close()
+        await analyzer.close()
+
+
+@router.post("/scan/history", response_model=ScanResponse)
+async def trigger_historical_scan(
+    pages: int = Query(default=100, ge=1, le=5000),
+    min_size: float = Query(default=10000.0, ge=1000.0),
+):
+    """
+    Trigger a deep historical scan to find whales.
+    Iterates backward through global trades filtering by min_size.
+    Then triggers analysis on found wallets.
+    """
+    scanner = Scanner()
+    from app.services.account_analyzer import AccountAnalyzer
+    analyzer = AccountAnalyzer(data=scanner.data, gamma=scanner.gamma, polygonscan=scanner.polygonscan)
+    
+    try:
+        # 1. Deep Ingest
+        count = await scanner.scan_history(lookback_pages=pages, min_size=min_size)
+        
+        # 2. Analyze
+        if count > 0:
+            await analyzer.analyze_all_wallets()
+        
+        return ScanResponse(
+            trades_processed=count,
+            message=f"Historical scan complete. {count} whale trades found. Analysis triggered.",
+        )
+    finally:
+        await scanner.close()
+        await analyzer.close()
+
+
+@router.get("/monitor/status")
+async def get_monitor_status():
+    """Return the real-time status of the analysis loop."""
+    return monitor.get_status()
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Admin / Debug Routes
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@router.post("/admin/start-loop")
+def start_scan_loop():
+    """Manually start the background scan loop."""
+    scan_loop.start()
+    return {"message": "Scan loop start command issued"}
+
+@router.post("/admin/stop-loop")
+async def stop_scan_loop():
+    """Manually stop the background scan loop."""
+    await scan_loop.stop()
+    return {"message": "Scan loop stopped"}

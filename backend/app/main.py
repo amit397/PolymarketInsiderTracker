@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -23,7 +24,12 @@ async def lifespan(application: FastAPI):
     """Startup / shutdown lifecycle."""
     await init_db()
     logging.getLogger(__name__).info("Database initialised")
+    
+    # Debug log to verify execution reach
+    logging.getLogger(__name__).info("Attempting to start scan_loop...")
     scan_loop.start()
+    logging.getLogger(__name__).info("scan_loop.start() called")
+    
     yield
     await scan_loop.stop()
 

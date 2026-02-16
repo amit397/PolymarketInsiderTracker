@@ -68,18 +68,22 @@ export default function ExpiringPage() {
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: "var(--space-4)" }}>
                     {markets.map((m, i) => {
                         const timeLeft = m.hours_remaining;
+                        const isExpired = timeLeft <= 0;
+                        const timeLabel = formatCountdown(timeLeft);
+
+                        // Urgency colors
                         const urgency = timeLeft < 24 ? "critical" : timeLeft < 72 ? "high" : "medium";
                         const badgeColor = urgency === "critical" ? "red" : urgency === "high" ? "amber" : "zinc";
-
-                        let timeLabel = formatCountdown(timeLeft);
-                        if (timeLabel === "Expired") timeLabel = "Closing";
 
                         return (
                             <div key={m.market_id || i} className="panel">
                                 <div className="panel-header" style={{ padding: "var(--space-4)", paddingBottom: 0, borderBottom: "none", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                                    <span className={`badge ${badgeColor}`}>
-                                        {timeLabel} Left
-                                    </span>
+                                    {!isExpired ? (
+                                        <span className={`badge ${badgeColor}`}>
+                                            {timeLabel} Left
+                                        </span>
+                                    ) : <span />} {/* Spacer if no badge, or just nothing */}
+
                                     {m.top_suspicion_score > 0 && (
                                         <span className="mono" style={{ color: "var(--signal-danger)", fontWeight: 700 }}>
                                             {m.top_suspicion_score.toFixed(1)}
@@ -89,7 +93,7 @@ export default function ExpiringPage() {
 
                                 <div className="panel-body" style={{ padding: "var(--space-4)" }}>
                                     <a
-                                        href={`https://polymarket.com/event/${m.slug}`}
+                                        href={`https://polymarket.com/event/${m.event_slug || m.slug}`}
                                         target="_blank"
                                         rel="noreferrer"
                                         style={{

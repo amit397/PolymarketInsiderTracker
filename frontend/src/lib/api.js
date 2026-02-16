@@ -57,6 +57,12 @@ export async function fetchSuspiciousMarkets({ limit = 20 } = {}) {
 /**
  * Fetch dashboard stats.
  */
+export async function fetchInsiders(limit = 50) {
+  const res = await fetch(`${API_BASE}/insiders?limit=${limit}`);
+  if (!res.ok) throw new Error("Failed to fetch insiders");
+  return res.json();
+}
+
 export async function fetchStats() {
   const res = await fetch(`${API_BASE}/api/stats`);
   if (!res.ok) throw new Error(`Stats: ${res.status}`);

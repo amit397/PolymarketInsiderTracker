@@ -9,7 +9,6 @@ export default function Navbar() {
     const links = [
         { href: "/", label: "Monitor", icon: MonitorIcon },
         { href: "/expiring", label: "Expiring", icon: TimerIcon },
-        { href: "/markets", label: "Markets", icon: GridIcon },
     ];
 
     return (

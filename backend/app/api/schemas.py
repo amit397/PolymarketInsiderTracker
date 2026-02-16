@@ -80,6 +80,7 @@ class ExpiringMarketResponse(BaseModel):
     top_suspicion_score: float = 0.0
     flagged_wallets: list[str] = Field(default_factory=list)
     image: str | None = None
+    event_slug: str | None = None
 
 
 # ---------------------------------------------------------------------------

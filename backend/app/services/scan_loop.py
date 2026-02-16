@@ -3,10 +3,9 @@ Background scan loop — runs the scanner continuously in a background
 asyncio task, sleeping between cycles.
 
 Each cycle:
-  1. Fetches up to 3,000 trades from the Data API
-  2. Deduplicates against already-processed tx_hashes in the DB
-  3. Classifies, filters, scores, and persists alerts
-  4. Sleeps SCAN_INTERVAL_SECONDS before repeating
+  1. Fetches trades (Scanner)
+  2. Analyzes accounts (AccountAnalyzer)
+  3. Sleeps SCAN_INTERVAL_SECONDS before repeating
 
 The loop is started inside the FastAPI lifespan so it runs as long as
 the server is up.
@@ -19,6 +18,7 @@ import logging
 
 from app.core.config import SCAN_INTERVAL_SECONDS
 from app.services.scanner import Scanner
+from app.services.account_analyzer import AccountAnalyzer
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +29,7 @@ class ScanLoop:
     def __init__(self) -> None:
         self._task: asyncio.Task | None = None
         self._scanner: Scanner | None = None
+        self._analyzer: AccountAnalyzer | None = None
         self._running = False
 
     # ------------------------------------------------------------------
@@ -42,6 +43,7 @@ class ScanLoop:
             return
         self._running = True
         self._task = asyncio.create_task(self._loop(), name="scan-loop")
+        print("DEBUG: ScanLoop task created") # Direct print to stdout
         logger.info(
             "Background scan loop started (interval=%ds)",
             SCAN_INTERVAL_SECONDS,
@@ -57,9 +59,15 @@ class ScanLoop:
             except asyncio.CancelledError:
                 pass
             self._task = None
+        
+        # Close resources
         if self._scanner:
             await self._scanner.close()
             self._scanner = None
+        if self._analyzer:
+            await self._analyzer.close()
+            self._analyzer = None
+            
         logger.info("Background scan loop stopped")
 
     # ------------------------------------------------------------------
@@ -69,18 +77,32 @@ class ScanLoop:
     async def _loop(self) -> None:
         """Run scan cycles forever until stopped."""
         cycle = 0
+        from app.core.monitor import monitor # Import here to avoid circular imports if any
+        
         while self._running:
             cycle += 1
+            monitor.update("Idle", stats={"loop_cycle": cycle, "scan_interval": SCAN_INTERVAL_SECONDS})
             try:
                 if self._scanner is None:
                     self._scanner = Scanner()
+                if self._analyzer is None:
+                    # Provide shared clients to analyzer if needed, or let it create its own.
+                    # Here we pass the scanner's clients to reuse connections.
+                    self._analyzer = AccountAnalyzer(
+                        data=self._scanner.data, 
+                        gamma=self._scanner.gamma,
+                        polygonscan=self._scanner.polygonscan
+                    )
 
                 logger.info("═══ Scan cycle %d starting ═══", cycle)
-                alerts = await self._scanner.run_scan()
-                logger.info(
-                    "═══ Scan cycle %d done — %d new alerts ═══",
-                    cycle, len(alerts),
-                )
+                
+                # 1. Ingest new trades
+                await self._scanner.run_scan()
+                
+                # 2. Analyze all accounts
+                await self._analyzer.analyze_all_wallets()
+
+                logger.info("═══ Scan cycle %d done ═══", cycle)
             except asyncio.CancelledError:
                 break
             except Exception:
@@ -88,6 +110,8 @@ class ScanLoop:
 
             # Sleep between cycles
             try:
+                # User request: "looking for new accounts" not "sleeping"
+                monitor.update("Searching for new targets...", stats={"next_scan_in": SCAN_INTERVAL_SECONDS})
                 await asyncio.sleep(SCAN_INTERVAL_SECONDS)
             except asyncio.CancelledError:
                 break
