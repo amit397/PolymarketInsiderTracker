@@ -50,7 +50,7 @@ SCORING_WEIGHTS: dict[str, float] = {
 # ---------------------------------------------------------------------------
 # Alert thresholds
 # ---------------------------------------------------------------------------
-ALERT_MIN_SCORE: float = 50.0
+ALERT_MIN_SCORE: float = 30.0
 ALERT_MIN_FACTORS_ABOVE: int = 2
 ALERT_FACTOR_THRESHOLD: float = 0.3
 

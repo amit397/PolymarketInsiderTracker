@@ -349,7 +349,7 @@ async def get_stats():
 @router.get("/insiders", response_model=list[WalletProfile])
 async def get_insiders(
     limit: int = Query(default=50, ge=1, le=100),
-    min_score: float = Query(default=50, ge=0, le=100),
+    min_score: float = Query(default=30, ge=0, le=100),
 ):
     """
     Get top insider accounts ranked by risk score.
@@ -397,6 +397,71 @@ async def get_insiders(
                     categories=categories,
                     win_rate=analysis.get("win_rate", 0.0),
                     alerts=[] 
+                )
+            )
+        return profiles
+    finally:
+        await db.close()
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# GET /api/whales  (High Win Rate profiles)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@router.get("/whales", response_model=list[WalletProfile])
+async def get_whales(
+    limit: int = Query(default=50, ge=1, le=100),
+    min_volume: float = Query(default=10000, ge=0),
+):
+    """
+    Get wallets with high win rates and profit but low risk scores.
+    These are skilled traders, not suspicious insiders.
+    """
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            """
+            SELECT * FROM wallets
+            WHERE total_volume >= ?
+              AND total_trades >= 3
+              AND analysis_json IS NOT NULL
+            ORDER BY total_profit DESC, total_volume DESC
+            LIMIT ?
+            """,
+            (min_volume, limit),
+        )
+        rows = await cursor.fetchall()
+
+        profiles = []
+        for row in rows:
+            analysis = {}
+            if row["analysis_json"]:
+                try:
+                    analysis = json.loads(row["analysis_json"])
+                except:
+                    pass
+
+            win_rate = analysis.get("win_rate", 0.0)
+
+            categories = {}
+            if row["categories_json"]:
+                try:
+                    categories = json.loads(row["categories_json"])
+                except:
+                    pass
+
+            profiles.append(
+                WalletProfile(
+                    address=row["address"],
+                    username=row["username"],
+                    first_seen=row["first_seen"],
+                    total_trades=row["total_trades"],
+                    total_volume=row["total_volume"],
+                    risk_score=row["risk_score"],
+                    analysis=analysis,
+                    categories=categories,
+                    win_rate=win_rate,
+                    alerts=[],
                 )
             )
         return profiles

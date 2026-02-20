@@ -1,0 +1,45 @@
+﻿
+============================================================
+DATABASE: .\data\insider_tracker.db (94208 bytes)
+============================================================
+  markets: 0 rows
+  trades: 28 rows
+  sqlite_sequence: 1 rows
+  wallets: 20 rows
+  alerts: 0 rows
+
+  TRADES: 28 total
+
+  Trade size distribution:
+    >= $100: 28 trades
+    >= $1,000: 28 trades
+    >= $5,000: 28 trades
+    >= $10,000: 28 trades
+    >= $50,000: 1 trades
+
+  Last 5 trades:
+    $15,003 BUY by 0xbd7081ea... | Will Amer Sports (AS) beat quarterly earnings?
+    $17,254 SELL by 0x23073ad0... | LoL: Natus Vincere vs Movistar KOI (BO3) - LEC Ver
+    $17,200 BUY by 0xfbf3d501... | Will Athletic Club win on 2026-02-20?
+    $17,200 BUY by 0xfbf3d501... | Will Athletic Club win on 2026-02-20?
+    $17,842 BUY by 0xea795760... | Will the US next strike Iran on February 24, 2026 
+
+  Unique wallets: 20
+  Wallets with >= $10K in single market: 20
+    0x031d98aa... -> $29,063 in market 0x168959e2c7e997109d...
+    0x07a9bf6d... -> $11,538 in market 0x841e8463bd6ddbf794...
+    0x23073ad0... -> $17,254 in market 0x37da845e5b87dde122...
+    0x35bbbad2... -> $19,270 in market 0x46d40e851b24d9b0af...
+    0x3cc654af... -> $70,259 in market 0x52e48dff5e7261b372...
+
+  WALLETS analyzed: 20
+    0xe1a8e339... Score=35.0 Trades=1 Vol=$18,331
+    0x35bbbad2... Score=35.0 Trades=1 Vol=$19,270
+    0x69602929... Score=35.0 Trades=1 Vol=$13,356
+    0xa9e8faf2... Score=35.0 Trades=1 Vol=$28,563
+    0xbd7081ea... Score=35.0 Trades=1 Vol=$15,009
+
+  ALERTS: 0
+
+
+Done.

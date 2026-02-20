@@ -97,10 +97,10 @@ class AccountAnalyzer:
             # New wallets not yet analyzed
             new_wallets = list(whale_wallets - scanned)
 
-            # Stale whales: already scanned, high score, not checked in 24h
+            # Stale whales: already scanned, notable score, not checked in 24h
             cursor = await db.execute("""
                 SELECT address FROM wallets 
-                WHERE risk_score >= 50
+                WHERE risk_score >= 20
                 AND last_scanned < datetime('now', '-1 day')
             """)
             rows = await cursor.fetchall()
@@ -145,7 +145,10 @@ class AccountAnalyzer:
     async def analyze_wallet(self, wallet: str) -> None:
         """Perform deep analysis on a single wallet using the five-factor scoring system."""
 
-        # ---- 1. Fetch trades from local DB ----
+        # ---- 1. Enrich: fetch wallet's full trade history from API ----
+        await self._enrich_wallet_history(wallet)
+
+        # ---- 2. Load all trades from local DB (including enriched ones) ----
         db = await get_db()
         try:
             cursor = await db.execute(
@@ -169,7 +172,7 @@ class AccountAnalyzer:
             logger.info("No trades found for %s in local DB", wallet)
             return
 
-        # ---- 2. Check $10K position threshold (per-market) ----
+        # ---- 3. Check $10K position threshold (per-market) ----
         market_volumes: dict[str, float] = defaultdict(float)
         for t in trades:
             cid = t.get("conditionId")
@@ -409,3 +412,94 @@ class AccountAnalyzer:
             logger.error("Failed to persist alert: %s", e)
         finally:
             await db.close()
+
+    async def _enrich_wallet_history(self, wallet: str) -> None:
+        """
+        Fetch the wallet's full trade history from the Data API and save
+        any new trades to the local DB. This gives the scoring system
+        enough data to compute win rates, entry prices, and PnL.
+        """
+        # Check if we've already enriched this wallet recently
+        db = await get_db()
+        try:
+            cursor = await db.execute(
+                "SELECT COUNT(*) FROM trades WHERE proxy_wallet = ?",
+                (wallet,),
+            )
+            existing_count = (await cursor.fetchone())[0]
+        finally:
+            await db.close()
+
+        # If wallet already has 10+ trades, skip enrichment (already done)
+        if existing_count >= 10:
+            return
+
+        logger.info("Enriching trade history for %s (currently %d trades)", wallet, existing_count)
+
+        try:
+            api_trades = await self.data.fetch_wallet_trades(
+                wallet, max_pages=50
+            )
+        except Exception as e:
+            logger.warning("Failed to fetch history for %s: %s", wallet, e)
+            return
+
+        if not api_trades:
+            logger.info("No API trades found for %s", wallet)
+            return
+
+        # Get existing tx hashes to avoid duplicates
+        db = await get_db()
+        try:
+            cursor = await db.execute(
+                "SELECT tx_hash FROM trades WHERE proxy_wallet = ? AND tx_hash IS NOT NULL",
+                (wallet,),
+            )
+            existing_hashes = {row[0] for row in await cursor.fetchall()}
+
+            new_trades = []
+            for t in api_trades:
+                tx = t.get("transactionHash", "")
+                if tx and tx not in existing_hashes:
+                    # Sanitize types
+                    try:
+                        size = float(t.get("size", 0))
+                        price = float(t.get("price", 0))
+                    except (ValueError, TypeError):
+                        continue
+
+                    new_trades.append((
+                        t.get("conditionId", ""),
+                        t.get("slug", ""),
+                        t.get("proxyWallet", wallet),
+                        t.get("side", ""),
+                        size,
+                        price,
+                        t.get("outcome", ""),
+                        t.get("timestamp", 0),
+                        tx,
+                        t.get("title", ""),
+                    ))
+
+            if new_trades:
+                await db.executemany(
+                    """
+                    INSERT OR IGNORE INTO trades
+                        (condition_id, market_slug, proxy_wallet, side, size,
+                         price, outcome, timestamp, tx_hash, market_question)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    new_trades,
+                )
+                await db.commit()
+                logger.info(
+                    "Enriched %s with %d new trades (was %d, now %d)",
+                    wallet, len(new_trades), existing_count, existing_count + len(new_trades),
+                )
+            else:
+                logger.info("No new trades to enrich for %s", wallet)
+        except Exception as e:
+            logger.error("Error enriching wallet %s: %s", wallet, e)
+        finally:
+            await db.close()
+

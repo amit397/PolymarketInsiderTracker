@@ -1,68 +1,68 @@
-﻿.\venv\Scripts\python.
-exe : C:\Users\User\De
-sktop\PolymarketInside
-rTracker\backend\venv\
-Lib\site-packages\pyte
-st_asyncio\plugin.py:2
-07: PytestDeprecationW
-arning: The 
-configuration option "
-asyncio_default_fixtur
-e_loop_scope" is 
-unset.
+﻿.\venv\Scripts\python.exe : C:\Users\User\Desktop\PolymarketInsiderTracker\backend\venv\Lib\site-packages\pytest_asyncio\plugin.py:207: PytestDeprecationWarning: The configuration option "asyncio_default_fixture_loop_scope" is unset.
 At line:1 char:1
-+ .\venv\Scripts\pytho
-n.exe -m pytest 
-tests/ --tb=short 
-2>&1 | Out-File ...
-+ ~~~~~~~~~~~~~~~~~~~~
-~~~~~~~~~~~~~~~~~~~~~~
-~~~~~~~~~~~~~~~~
-    + CategoryInfo    
-          : NotSpeci  
-  fied: (C:\Users\U   
- ser\D...cope" is     
-unset.:String) []    
-, RemoteException
-    + FullyQualifiedE 
-   rrorId : NativeCo  
-  mmandError
++ .\venv\Scripts\python.exe -m pytest tests/ -v --tb=short 2>&1 | Out-F ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo              : NotSpecified    : (C:\Users\User\D.    ..cope" is unset.:S    tring) [], RemoteEx    ception
+    + FullyQualifiedErr    orId : NativeComman    dError
  
-The event loop scope 
-for asynchronous 
-fixtures will default 
-to the fixture 
-caching scope. Future 
-versions of 
-pytest-asyncio will 
-default the loop 
-scope for 
-asynchronous fixtures 
-to function scope. 
-Set the default 
-fixture loop scope 
-explicitly in order 
-to avoid unexpected 
-behavior in the 
-future. Valid fixture 
-loop scopes are: 
-"function", "class", 
-"module", "package", 
-"session"
+The event loop scope for asynchronous fixtures will default to the fixture caching scope. Future versions of pytest-asyncio will default the loop scope for asynchronous fixtures to function scope. Set the default fixture loop scope explicitly 
+in order to avoid unexpected behavior in the future. Valid fixture loop scopes are: "function", "class", "module", "package", "session"
 
-  warnings.warn(Pytest
-DeprecationWarning(_DE
-FAULT_FIXTURE_LOOP_SCO
-PE_UNSET))
+  warnings.warn(PytestDeprecationWarning(_DEFAULT_FIXTURE_LOOP_SCOPE_UNSET))
 ============================= test session starts =============================
-platform win32 -- Python 3.12.6, pytest-8.3.4, pluggy-1.6.0
+platform win32 -- Python 3.12.6, pytest-8.3.4, pluggy-1.6.0 -- C:\Users\User\Desktop\PolymarketInsiderTracker\backend\venv\Scripts\python.exe
+cachedir: .pytest_cache
 rootdir: C:\Users\User\Desktop\PolymarketInsiderTracker\backend
 configfile: pytest.ini
 plugins: anyio-4.12.1, asyncio-0.25.0
 asyncio: mode=Mode.AUTO, asyncio_default_fixture_loop_scope=None
-collected 46 items
+collecting ... collected 46 items
 
-tests\test_pnl_calculator.py ..........                                  [ 21%]
-tests\test_scoring.py ....................................               [100%]
+tests/test_pnl_calculator.py::test_empty_trades PASSED                   [  2%]
+tests/test_pnl_calculator.py::test_no_resolved_markets PASSED            [  4%]
+tests/test_pnl_calculator.py::test_buy_winner_is_win PASSED              [  6%]
+tests/test_pnl_calculator.py::test_buy_loser_is_loss PASSED              [  8%]
+tests/test_pnl_calculator.py::test_net_position_buy_sell PASSED          [ 10%]
+tests/test_pnl_calculator.py::test_sold_out_before_resolution PASSED     [ 13%]
+tests/test_pnl_calculator.py::test_mixed_results PASSED                  [ 15%]
+tests/test_pnl_calculator.py::test_avg_entry_price PASSED                [ 17%]
+tests/test_pnl_calculator.py::test_pnl_correct_for_winner PASSED         [ 19%]
+tests/test_pnl_calculator.py::test_pnl_correct_for_loser PASSED          [ 21%]
+tests/test_scoring.py::TestWinRateAnomaly::test_insufficient_sample PASSED [ 23%]
+tests/test_scoring.py::TestWinRateAnomaly::test_50_percent PASSED        [ 26%]
+tests/test_scoring.py::TestWinRateAnomaly::test_below_50 PASSED          [ 28%]
+tests/test_scoring.py::TestWinRateAnomaly::test_80_percent PASSED        [ 30%]
+tests/test_scoring.py::TestWinRateAnomaly::test_100_percent PASSED       [ 32%]
+tests/test_scoring.py::TestWinRateAnomaly::test_exactly_5_markets PASSED [ 34%]
+tests/test_scoring.py::TestBetConcentration::test_all_in_one PASSED      [ 36%]
+tests/test_scoring.py::TestBetConcentration::test_half PASSED            [ 39%]
+tests/test_scoring.py::TestBetConcentration::test_low PASSED             [ 41%]
+tests/test_scoring.py::TestBetConcentration::test_zero_total PASSED      [ 43%]
+tests/test_scoring.py::TestBetConcentration::test_capped PASSED          [ 45%]
+tests/test_scoring.py::TestTimingSignal::test_zero_hours PASSED          [ 47%]
+tests/test_scoring.py::TestTimingSignal::test_negative PASSED            [ 50%]
+tests/test_scoring.py::TestTimingSignal::test_1h PASSED                  [ 52%]
+tests/test_scoring.py::TestTimingSignal::test_24h PASSED                 [ 54%]
+tests/test_scoring.py::TestTimingSignal::test_48h PASSED                 [ 56%]
+tests/test_scoring.py::TestTimingSignal::test_168h PASSED                [ 58%]
+tests/test_scoring.py::TestTimingSignal::test_720h PASSED                [ 60%]
+tests/test_scoring.py::TestTimingSignal::test_beyond_max PASSED          [ 63%]
+tests/test_scoring.py::TestTimingSignal::test_monotonic PASSED           [ 65%]
+tests/test_scoring.py::TestTimingSignal::test_backward_compat_alias PASSED [ 67%]
+tests/test_scoring.py::TestEntryPriceEdge::test_winner_at_5_cents PASSED [ 69%]
+tests/test_scoring.py::TestEntryPriceEdge::test_winner_at_20_cents PASSED [ 71%]
+tests/test_scoring.py::TestEntryPriceEdge::test_winner_at_50_cents PASSED [ 73%]
+tests/test_scoring.py::TestEntryPriceEdge::test_winner_at_90_cents PASSED [ 76%]
+tests/test_scoring.py::TestEntryPriceEdge::test_loser PASSED             [ 78%]
+tests/test_scoring.py::TestAccountPattern::test_perfect_insider_profile PASSED [ 80%]
+tests/test_scoring.py::TestAccountPattern::test_old_diversified_whale PASSED [ 82%]
+tests/test_scoring.py::TestAccountPattern::test_no_age_data PASSED       [ 84%]
+tests/test_scoring.py::TestAccountPattern::test_backward_compat_freshness PASSED [ 86%]
+tests/test_scoring.py::TestSuspicionScore::test_all_zeros PASSED         [ 89%]
+tests/test_scoring.py::TestSuspicionScore::test_all_ones PASSED          [ 91%]
+tests/test_scoring.py::TestSuspicionScore::test_cap_at_100 PASSED        [ 93%]
+tests/test_scoring.py::TestSuspicionScore::test_typical_insider PASSED   [ 95%]
+tests/test_scoring.py::TestSuspicionScore::test_single_factor_not_enough PASSED [ 97%]
+tests/test_scoring.py::TestSuspicionScore::test_to_dict PASSED           [100%]
 
-============================= 46 passed in 0.05s ==============================
+============================= 46 passed in 0.08s ==============================

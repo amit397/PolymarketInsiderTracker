@@ -81,3 +81,14 @@ export async function triggerScan({ lookbackHours = 24 } = {}) {
   if (!res.ok) throw new Error(`Scan: ${res.status}`);
   return res.json();
 }
+
+/**
+ * Fetch high-win-rate whale profiles.
+ */
+export async function fetchWhales({ limit = 50, minVolume = 10000 } = {}) {
+  const params = new URLSearchParams({ limit: String(limit), min_volume: String(minVolume) });
+  const res = await fetch(`${API_BASE}/api/whales?${params}`);
+  if (!res.ok) throw new Error(`Whales: ${res.status}`);
+  return res.json();
+}
+

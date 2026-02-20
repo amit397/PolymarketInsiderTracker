@@ -8,6 +8,7 @@ export default function Navbar() {
 
     const links = [
         { href: "/", label: "Monitor", icon: MonitorIcon },
+        { href: "/whales", label: "Whales", icon: GridIcon },
         { href: "/expiring", label: "Expiring", icon: TimerIcon },
     ];
 
