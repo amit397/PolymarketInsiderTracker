@@ -41,10 +41,15 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS – allow the Next.js frontend in development
+# CORS – allow the Next.js frontend in dev + production
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "https://polymarketinsider.vercel.app",
+        "https://polymarketinsider-*-amitzxc123-6796s-projects.vercel.app",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
