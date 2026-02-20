@@ -1,5 +1,6 @@
 import "./globals.css";
 import Navbar from "@/components/Navbar";
+import { Analytics } from "@vercel/analytics/react";
 
 export const metadata = {
   title: "Insider Tracker — Polymarket Suspicious Activity Monitor",
@@ -15,6 +16,7 @@ export default function RootLayout({ children }) {
         <main className="container" style={{ paddingBottom: "var(--space-12)", paddingTop: "var(--space-8)" }}>
           {children}
         </main>
+        <Analytics />
       </body>
     </html>
   );
