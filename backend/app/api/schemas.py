@@ -10,11 +10,11 @@ from pydantic import BaseModel, Field
 # ---------------------------------------------------------------------------
 
 class FactorBreakdown(BaseModel):
-    volume_anomaly: float = 0.0
-    topic_concentration: float = 0.0
-    market_timing: float = 0.0
-    wallet_freshness: float = 0.0
-    rapid_profit: float = 0.0
+    win_rate_anomaly: float = 0.0
+    bet_concentration: float = 0.0
+    timing_signal: float = 0.0
+    entry_price_edge: float = 0.0
+    account_pattern: float = 0.0
     elevated_factors: list[str] = Field(default_factory=list)
 
 

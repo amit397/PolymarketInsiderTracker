@@ -35,11 +35,11 @@ def _parse_factors(factors_json: str) -> FactorBreakdown:
     try:
         data = json.loads(factors_json)
         return FactorBreakdown(
-            volume_anomaly=data.get("volume_anomaly", 0),
-            topic_concentration=data.get("topic_concentration", 0),
-            market_timing=data.get("market_timing", 0),
-            wallet_freshness=data.get("wallet_freshness", 0),
-            rapid_profit=data.get("rapid_profit", 0),
+            win_rate_anomaly=data.get("win_rate_anomaly", 0),
+            bet_concentration=data.get("bet_concentration", 0),
+            timing_signal=data.get("timing_signal", 0),
+            entry_price_edge=data.get("entry_price_edge", 0),
+            account_pattern=data.get("account_pattern", 0),
             elevated_factors=data.get("elevated_factors", []),
         )
     except (json.JSONDecodeError, TypeError):

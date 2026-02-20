@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS wallets (
     first_seen       INTEGER,
     total_trades     INTEGER DEFAULT 0,
     total_volume     REAL DEFAULT 0,
+    total_profit     REAL DEFAULT 0,
     categories_json  TEXT DEFAULT '{}',
     last_scanned     TEXT,
     risk_score       REAL DEFAULT 0,

@@ -1,0 +1,68 @@
+﻿.\venv\Scripts\python.
+exe : C:\Users\User\De
+sktop\PolymarketInside
+rTracker\backend\venv\
+Lib\site-packages\pyte
+st_asyncio\plugin.py:2
+07: PytestDeprecationW
+arning: The 
+configuration option "
+asyncio_default_fixtur
+e_loop_scope" is 
+unset.
+At line:1 char:1
++ .\venv\Scripts\pytho
+n.exe -m pytest 
+tests/ --tb=short 
+2>&1 | Out-File ...
++ ~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~
+    + CategoryInfo    
+          : NotSpeci  
+  fied: (C:\Users\U   
+ ser\D...cope" is     
+unset.:String) []    
+, RemoteException
+    + FullyQualifiedE 
+   rrorId : NativeCo  
+  mmandError
+ 
+The event loop scope 
+for asynchronous 
+fixtures will default 
+to the fixture 
+caching scope. Future 
+versions of 
+pytest-asyncio will 
+default the loop 
+scope for 
+asynchronous fixtures 
+to function scope. 
+Set the default 
+fixture loop scope 
+explicitly in order 
+to avoid unexpected 
+behavior in the 
+future. Valid fixture 
+loop scopes are: 
+"function", "class", 
+"module", "package", 
+"session"
+
+  warnings.warn(Pytest
+DeprecationWarning(_DE
+FAULT_FIXTURE_LOOP_SCO
+PE_UNSET))
+============================= test session starts =============================
+platform win32 -- Python 3.12.6, pytest-8.3.4, pluggy-1.6.0
+rootdir: C:\Users\User\Desktop\PolymarketInsiderTracker\backend
+configfile: pytest.ini
+plugins: anyio-4.12.1, asyncio-0.25.0
+asyncio: mode=Mode.AUTO, asyncio_default_fixture_loop_scope=None
+collected 46 items
+
+tests\test_pnl_calculator.py ..........                                  [ 21%]
+tests\test_scoring.py ....................................               [100%]
+
+============================= 46 passed in 0.05s ==============================

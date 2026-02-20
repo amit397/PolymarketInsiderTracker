@@ -1,182 +1,174 @@
-"""Tests for the scoring engine."""
-
-import math
+"""Tests for the redesigned scoring engine."""
 
 import pytest
 
 from app.services.scoring import (
-    compute_market_timing,
-    compute_rapid_profit,
+    compute_win_rate_anomaly,
+    compute_bet_concentration,
+    compute_timing_signal,
+    compute_entry_price_edge,
+    compute_account_pattern,
     compute_suspicion_score,
-    compute_topic_concentration,
-    compute_volume_anomaly,
+    compute_market_timing,
     compute_wallet_freshness,
 )
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# N_V: Volume Anomaly
+# Win Rate Anomaly
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-class TestVolumeAnomaly:
-    def test_normal_trade(self):
-        """A trade at the mean should score 0."""
-        score = compute_volume_anomaly(100, 100, 30, 20)
-        assert score == 0.0
+class TestWinRateAnomaly:
+    def test_insufficient_sample(self):
+        """Below MIN_RESOLVED_MARKETS → 0 regardless of win rate."""
+        assert compute_win_rate_anomaly(100.0, 3) == 0.0
+        assert compute_win_rate_anomaly(100.0, 4) == 0.0
 
-    def test_large_outlier(self):
-        """A trade 3σ above the mean should score 1.0."""
-        score = compute_volume_anomaly(190, 100, 30, 20)
-        assert score == 1.0
+    def test_50_percent(self):
+        """50% win rate = random → 0.0."""
+        assert compute_win_rate_anomaly(50.0, 10) == 0.0
 
-    def test_moderate_outlier(self):
-        """A trade 1.5σ above the mean should score ~0.5."""
-        score = compute_volume_anomaly(145, 100, 30, 20)
-        assert 0.4 <= score <= 0.6
+    def test_below_50(self):
+        """Below average → 0.0."""
+        assert compute_win_rate_anomaly(30.0, 10) == 0.0
 
-    def test_below_mean(self):
-        """A trade below the mean should score 0."""
-        score = compute_volume_anomaly(50, 100, 30, 20)
-        assert score == 0.0
+    def test_80_percent(self):
+        """80% with sufficient markets → 0.6."""
+        score = compute_win_rate_anomaly(80.0, 10)
+        assert score == pytest.approx(0.6)
 
-    def test_sigma_floor(self):
-        """σ = 0 should not raise an error — uses σ floor."""
-        score = compute_volume_anomaly(100, 50, 0, 15)
-        assert score > 0  # 100 > 50, so z > 0
+    def test_100_percent(self):
+        """100% → 1.0."""
+        assert compute_win_rate_anomaly(100.0, 5) == 1.0
 
-    def test_low_trade_count_fallback(self):
-        """Below min trades, should fall back to global stats."""
-        # Only 3 market trades, but global stats provided
-        score = compute_volume_anomaly(200, 50, 10, 3, global_mean=100, global_std=30)
-        # Should use global stats: z = (200 - 100) / 90 ≈ 1.11
+    def test_exactly_5_markets(self):
+        """Exactly MIN_RESOLVED_MARKETS should work."""
+        score = compute_win_rate_anomaly(90.0, 5)
         assert score > 0.0
 
-    def test_low_trade_count_no_global(self):
-        """Below min trades and no global stats → 0."""
-        score = compute_volume_anomaly(1000, 50, 10, 3)
-        assert score == 0.0
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Bet Concentration
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+class TestBetConcentration:
+    def test_all_in_one(self):
+        assert compute_bet_concentration(5000.0, 5000.0) == 1.0
+
+    def test_half(self):
+        assert compute_bet_concentration(2500.0, 5000.0) == 0.5
+
+    def test_low(self):
+        assert compute_bet_concentration(500.0, 5000.0) == pytest.approx(0.1)
+
+    def test_zero_total(self):
+        assert compute_bet_concentration(100.0, 0.0) == 0.0
+
+    def test_capped(self):
+        assert compute_bet_concentration(6000.0, 5000.0) == 1.0
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# N_C: Topic Concentration
+# Timing Signal (backward compat with market_timing alias)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-class TestTopicConcentration:
-    def test_all_in_one_market(self):
-        """All volume in one market → 1.0."""
-        assert compute_topic_concentration(5000.0, 5000.0) == 1.0
-
-    def test_half_concentration(self):
-        """Half of volume in this market → 0.5."""
-        assert compute_topic_concentration(2500.0, 5000.0) == 0.5
-
-    def test_low_concentration(self):
-        """Small fraction → low score."""
-        score = compute_topic_concentration(500.0, 5000.0)
-        assert score == pytest.approx(0.1)
-
-    def test_zero_total_volume(self):
-        """Zero total volume → 0.0."""
-        assert compute_topic_concentration(100.0, 0.0) == 0.0
-
-    def test_capped_at_one(self):
-        """Should not exceed 1.0 even if market > total (edge case)."""
-        assert compute_topic_concentration(6000.0, 5000.0) == 1.0
-
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# N_M: Market Timing (logarithmic decay)
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-class TestMarketTiming:
+class TestTimingSignal:
     def test_zero_hours(self):
-        """Trade at resolution → 1.0."""
-        assert compute_market_timing(0) == 1.0
+        assert compute_timing_signal(0) == 1.0
 
-    def test_negative_hours(self):
-        """After resolution → 1.0."""
-        assert compute_market_timing(-5) == 1.0
+    def test_negative(self):
+        assert compute_timing_signal(-5) == 1.0
 
-    def test_one_hour(self):
-        """1 hour → ~0.89."""
-        score = compute_market_timing(1)
+    def test_1h(self):
+        score = compute_timing_signal(1)
         assert 0.85 <= score <= 0.95
 
-    def test_24_hours(self):
-        """24 hours → ~0.52."""
-        score = compute_market_timing(24)
+    def test_24h(self):
+        score = compute_timing_signal(24)
         assert 0.45 <= score <= 0.58
 
-    def test_48_hours(self):
-        """48 hours → ~0.41 (the key fix)."""
-        score = compute_market_timing(48)
+    def test_48h(self):
+        score = compute_timing_signal(48)
         assert 0.35 <= score <= 0.47
 
-    def test_168_hours(self):
-        """7 days → ~0.24."""
-        score = compute_market_timing(168)
+    def test_168h(self):
+        score = compute_timing_signal(168)
         assert 0.18 <= score <= 0.30
 
-    def test_720_hours(self):
-        """30 days → 0.0."""
-        assert compute_market_timing(720) == 0.0
+    def test_720h(self):
+        assert compute_timing_signal(720) == 0.0
 
     def test_beyond_max(self):
-        """Beyond 30 days → 0.0."""
-        assert compute_market_timing(1000) == 0.0
+        assert compute_timing_signal(1000) == 0.0
 
-    def test_monotonic_decrease(self):
-        """Score should decrease as hours increase."""
+    def test_monotonic(self):
         hours = [1, 6, 24, 48, 72, 168, 500, 720]
-        scores = [compute_market_timing(h) for h in hours]
+        scores = [compute_timing_signal(h) for h in hours]
         for i in range(len(scores) - 1):
-            assert scores[i] > scores[i + 1], f"Not monotonic at {hours[i]}h vs {hours[i+1]}h"
+            assert scores[i] > scores[i + 1]
+
+    def test_backward_compat_alias(self):
+        """compute_market_timing should be an alias."""
+        assert compute_market_timing(24) == compute_timing_signal(24)
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# N_F: Wallet Freshness
+# Entry Price Edge
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-class TestWalletFreshness:
-    def test_brand_new(self):
+class TestEntryPriceEdge:
+    def test_winner_at_5_cents(self):
+        """Buying at $0.05 and winning → high edge."""
+        score = compute_entry_price_edge(0.05, won=True)
+        assert 0.85 <= score <= 0.95
+
+    def test_winner_at_20_cents(self):
+        """Buying at $0.20 and winning → moderate edge."""
+        score = compute_entry_price_edge(0.20, won=True)
+        assert 0.55 <= score <= 0.65
+
+    def test_winner_at_50_cents(self):
+        """Buying at $0.50 → no edge (fair price)."""
+        assert compute_entry_price_edge(0.50, won=True) == 0.0
+
+    def test_winner_at_90_cents(self):
+        """Buying at $0.90 → no edge (overpriced)."""
+        assert compute_entry_price_edge(0.90, won=True) == 0.0
+
+    def test_loser(self):
+        """Lost → no edge regardless of price."""
+        assert compute_entry_price_edge(0.05, won=False) == 0.0
+        assert compute_entry_price_edge(0.50, won=False) == 0.0
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Account Pattern
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+class TestAccountPattern:
+    def test_perfect_insider_profile(self):
+        """New, single-market, concentrated → high score."""
+        score = compute_account_pattern(age_days=1, total_markets_traded=1, concentration=1.0)
+        assert score > 0.9
+
+    def test_old_diversified_whale(self):
+        """Old, 15 markets, spread out → low score."""
+        score = compute_account_pattern(age_days=500, total_markets_traded=15, concentration=0.1)
+        assert score < 0.15
+
+    def test_no_age_data(self):
+        """Missing age yields score from market count + concentration only."""
+        score = compute_account_pattern(age_days=None, total_markets_traded=1, concentration=1.0)
+        assert score > 0.8
+
+    def test_backward_compat_freshness(self):
+        """compute_wallet_freshness still works."""
         assert compute_wallet_freshness(0) == 1.0
-
-    def test_one_year(self):
         assert compute_wallet_freshness(365) == 0.0
 
-    def test_half_year(self):
-        score = compute_wallet_freshness(182.5)
-        assert 0.49 <= score <= 0.51
-
-    def test_very_old(self):
-        """Older than a year → 0."""
-        assert compute_wallet_freshness(1000) == 0.0
-
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# N_R: Rapid Profit
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-class TestRapidProfit:
-    def test_buy_price_increase(self):
-        """Buy at 0.30, price goes to 0.60 → move = 0.30 → 0.30/0.20 = 1.0 (capped)."""
-        assert compute_rapid_profit(0.30, 0.60, "BUY") == 1.0
-
-    def test_buy_price_decrease(self):
-        """Buy at 0.30, price drops to 0.20 → move = -0.10 → 0."""
-        assert compute_rapid_profit(0.30, 0.20, "BUY") == 0.0
-
-    def test_sell_price_decrease(self):
-        """Sell at 0.70, price drops to 0.40 → move = 0.30 → 1.0 (capped)."""
-        assert compute_rapid_profit(0.70, 0.40, "SELL") == 1.0
-
-    def test_moderate_move(self):
-        """10% move → ~0.5."""
-        assert compute_rapid_profit(0.50, 0.60, "BUY") == pytest.approx(0.5)
-
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# Aggregate scoring & alert gate
+# Aggregate Scoring & Gate
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 class TestSuspicionScore:
@@ -191,30 +183,26 @@ class TestSuspicionScore:
         assert result.passes_gate
 
     def test_cap_at_100(self):
-        """Score should never exceed 100."""
         result = compute_suspicion_score(1.5, 1.5, 1.5, 1.5, 1.5)
         assert result.score == 100.0
 
-    def test_gate_requires_min_factors(self):
-        """High score from one factor alone shouldn't pass gate."""
-        # Only volume is high
-        result = compute_suspicion_score(1.0, 0.1, 0.1, 0.1, 0.1)
-        # Score ≈ 30 + 2.5 + 2 + 1.5 + 1 = 37 — below 50
-        assert not result.passes_gate
-
     def test_typical_insider(self):
-        """Classic insider profile should pass the gate."""
+        """High win rate + concentrated + good timing + edge + new account."""
         result = compute_suspicion_score(
-            volume_anomaly=0.8,
-            topic_concentration=1.0,
-            market_timing=0.5,  # ~24h before resolution
-            wallet_freshness=0.9,
-            rapid_profit=0.6,
+            win_rate_anomaly=0.8,
+            bet_concentration=1.0,
+            timing_signal=0.5,
+            entry_price_edge=0.6,
+            account_pattern=0.9,
         )
-        # Score ≈ 24 + 25 + 10 + 13.5 + 6 = 78.5
-        assert result.score >= 70
+        assert result.score >= 60
         assert result.passes_gate
-        assert len(result.elevated_factors) >= 4
+        assert len(result.elevated_factors) >= 3
+
+    def test_single_factor_not_enough(self):
+        """One high factor alone shouldn't pass gate."""
+        result = compute_suspicion_score(1.0, 0.1, 0.1, 0.1, 0.1)
+        assert not result.passes_gate
 
     def test_to_dict(self):
         result = compute_suspicion_score(0.5, 0.5, 0.5, 0.5, 0.5)
@@ -222,3 +210,5 @@ class TestSuspicionScore:
         assert "score" in d
         assert "passes_gate" in d
         assert "elevated_factors" in d
+        assert "win_rate_anomaly" in d
+        assert "entry_price_edge" in d

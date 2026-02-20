@@ -1,6 +1,15 @@
 """
-Account Analyzer Service.
-Iterates through known wallets and analyzes their trading history to identify insiders.
+Account Analyzer Service — Redesigned.
+
+Iterates through known wallets and analyzes their trading history to identify
+potential insiders using the five-factor scoring system.
+
+Key design principles:
+  - Only considers wallets with ≥$10K position in at least one market
+  - Requires statistical significance (≥5 resolved markets) for win rate signal
+  - No arbitrary hardcoded score overrides
+  - Single Polygonscan call per wallet (not per trade)
+  - Uses net-position-based PnL, not "last intent" heuristic
 """
 
 from __future__ import annotations
@@ -8,17 +17,30 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import statistics
-import time
+from collections import defaultdict
 from datetime import datetime, timezone
+from typing import Any
 
+from app.core.config import (
+    ALERT_MIN_SCORE,
+    MIN_POSITION_SIZE,
+    MIN_RESOLVED_MARKETS,
+)
 from app.core.database import get_db
+from app.core.monitor import monitor
 from app.services.data_client import DataClient
 from app.services.gamma_client import GammaClient
 from app.services.pnl_calculator import PnLCalculator
 from app.services.polygonscan import PolygonscanClient
-from app.services.scoring import compute_suspicion_score
-from app.core.monitor import monitor # Import Monitor
+from app.services.scoring import (
+    ScoringResult,
+    compute_bet_concentration,
+    compute_entry_price_edge,
+    compute_win_rate_anomaly,
+    compute_timing_signal,
+    compute_account_pattern,
+    compute_suspicion_score,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -47,59 +69,72 @@ class AccountAnalyzer:
     async def analyze_all_wallets(self) -> None:
         """
         Iterate through all unique wallets in the 'trades' table and analyze them.
-        updates the 'wallets' table with risk scores and stats.
+        Updates the 'wallets' table with risk scores and stats.
+        
+        Only analyzes wallets that have ≥$10K total position in at least one market.
         """
         logger.info("Starting systematic account analysis...")
         monitor.update("Starting Account Analysis Cycle")
-        
-        # 1. Get all unique wallets from trades table
+
         db = await get_db()
         try:
-            # Get candidates
-            cursor = await db.execute("SELECT DISTINCT proxy_wallet FROM trades WHERE proxy_wallet IS NOT NULL AND proxy_wallet != ''")
+            # Get wallets with ≥$10K in at least one market (aggregated by market)
+            cursor = await db.execute("""
+                SELECT proxy_wallet, condition_id, SUM(size) as market_total
+                FROM trades 
+                WHERE proxy_wallet IS NOT NULL AND proxy_wallet != ''
+                GROUP BY proxy_wallet, condition_id
+                HAVING SUM(size) >= ?
+            """, (MIN_POSITION_SIZE,))
             rows = await cursor.fetchall()
-            candidates = {row[0] for row in rows}
+            whale_wallets = {row[0] for row in rows}
 
             # Get already scanned (set of addresses)
             cursor = await db.execute("SELECT address FROM wallets")
             rows = await cursor.fetchall()
             scanned = {row[0] for row in rows}
-            
-            # 1. New Wallets: Candidates that are NOT in 'scanned'
-            new_wallets = list(candidates - scanned)
 
-            # 2. Stale Whales: Already scanned, but match "Whale" criteria and haven't been checked in 24h
-            # Criteria: PnL > $10k OR Risk Score > 50
+            # New wallets not yet analyzed
+            new_wallets = list(whale_wallets - scanned)
+
+            # Stale whales: already scanned, high score, not checked in 24h
             cursor = await db.execute("""
                 SELECT address FROM wallets 
-                WHERE (total_profit >= 10000 OR risk_score >= 50)
+                WHERE risk_score >= 50
                 AND last_scanned < datetime('now', '-1 day')
             """)
             rows = await cursor.fetchall()
             stale_whales = [row[0] for row in rows]
 
-            # Combine
             wallets = list(set(new_wallets + stale_whales))
-            
+
         finally:
             await db.close()
 
         if not wallets:
-            logger.info("No new wallets or stale whales to analyze.")
+            logger.info("No new whale wallets or stale targets to analyze.")
             monitor.update("Idle - No targets found", stats={"last_cycle_wallets": 0})
             return
 
-        logger.info("Found %d wallets to analyze (%d new, %d stale whales)", len(wallets), len(new_wallets), len(stale_whales))
-        monitor.update(f"Queue: {len(new_wallets)} New, {len(stale_whales)} Whales", stats={"total_wallets": len(wallets)})
+        logger.info(
+            "Found %d wallets to analyze (%d new, %d stale)",
+            len(wallets), len(new_wallets), len(stale_whales),
+        )
+        monitor.update(
+            f"Queue: {len(new_wallets)} New, {len(stale_whales)} Stale",
+            stats={"total_wallets": len(wallets)},
+        )
 
         for i, wallet in enumerate(wallets):
             try:
-                is_whale_rescan = wallet in stale_whales
-                status_msg = f"Re-verifying Whale ({i+1}/{len(wallets)})" if is_whale_rescan else f"Analyzing New Target ({i+1}/{len(wallets)})"
-                
-                monitor.update(status_msg, wallet=wallet, stats={"processed": i+1, "total": len(wallets)})
+                is_rescan = wallet in stale_whales
+                status_msg = (
+                    f"Re-verifying Target ({i+1}/{len(wallets)})"
+                    if is_rescan
+                    else f"Analyzing New Target ({i+1}/{len(wallets)})"
+                )
+                monitor.update(status_msg, wallet=wallet, stats={"processed": i + 1, "total": len(wallets)})
                 await self.analyze_wallet(wallet)
-                # Sleep briefly to avoid rate limits
                 await asyncio.sleep(0.5)
             except Exception as e:
                 logger.error("Failed to analyze wallet %s: %s", wallet, e)
@@ -108,25 +143,24 @@ class AccountAnalyzer:
         monitor.update("Idle", wallet=None, stats={"last_cycle_wallets": len(wallets)})
 
     async def analyze_wallet(self, wallet: str) -> None:
-        """Perform deep analysis on a single wallet."""
-        # 1. Fetch entire history from LOCAL DB (API is not reliable for history)
+        """Perform deep analysis on a single wallet using the five-factor scoring system."""
+
+        # ---- 1. Fetch trades from local DB ----
         db = await get_db()
         try:
             cursor = await db.execute(
-                "SELECT * FROM trades WHERE proxy_wallet = ? ORDER BY timestamp DESC", 
-                (wallet,)
+                "SELECT * FROM trades WHERE proxy_wallet = ? ORDER BY timestamp DESC",
+                (wallet,),
             )
             rows = await cursor.fetchall()
             trades = []
             for row in rows:
-                # Convert row to dict and map to expected format
                 t = dict(row)
-                # Map snake_case DB columns to camelCase API format used by logic
                 t["conditionId"] = t["condition_id"]
                 t["transactionHash"] = t["tx_hash"]
-                # Ensure numeric types
                 t["size"] = float(t["size"])
                 t["price"] = float(t["price"])
+                t["title"] = t.get("market_question", "")
                 trades.append(t)
         finally:
             await db.close()
@@ -135,211 +169,212 @@ class AccountAnalyzer:
             logger.info("No trades found for %s in local DB", wallet)
             return
 
-        # 2. Match with Market Info for PnL/WinRate
-        market_ids = {t.get("conditionId") for t in trades if t.get("conditionId")}
-        resolved_markets = {}
-        
-        # Optimize: Fetch markets in batches or individually if needed
-        # For now, fetch individually but we should probably cache this in a real high-throughput system
-        # We'll use the GammaClient to fetch market details
+        # ---- 2. Check $10K position threshold (per-market) ----
+        market_volumes: dict[str, float] = defaultdict(float)
+        for t in trades:
+            cid = t.get("conditionId")
+            if cid:
+                market_volumes[cid] += t["size"]
+
+        max_single_market = max(market_volumes.values()) if market_volumes else 0.0
+        if max_single_market < MIN_POSITION_SIZE:
+            # Mark as scanned but skip detailed analysis
+            await self._mark_scanned(wallet, len(trades), sum(t["size"] for t in trades))
+            return
+
+        # ---- 3. Fetch market resolution data ----
+        market_ids = list(market_volumes.keys())
+        resolved_markets: dict[str, dict[str, Any]] = {}
         for mid in market_ids:
-            if not mid: continue
+            if not mid:
+                continue
             try:
-                 # Check if we can get resolution data
-                 # We need to know if the market is resolved and who won
-                 m = await self.gamma.fetch_market_by_id(mid)
-                 if m:
-                     resolved_markets[mid] = m
+                m = await self.gamma.fetch_market_by_id(mid)
+                if m:
+                    resolved_markets[mid] = m
             except Exception:
                 pass
 
-        # 3. Calculate Stats
+        # ---- 4. Calculate PnL / Win Rate (net-position based) ----
         pnl_stats = self.pnl_calculator.calculate_stats(trades, resolved_markets)
         win_rate = pnl_stats.get("win_rate", 0.0)
         total_profit = pnl_stats.get("total_profit", 0.0)
         total_pnl = pnl_stats.get("total_pnl", 0.0)
+        resolved_count = pnl_stats.get("resolved_markets_count", 0)
+        avg_entry_prices = pnl_stats.get("avg_entry_prices", {})
 
-        # 4. Compute Risk Score (Simplified for aggregated view)
-        # We can re-use the scoring logic or define a new "Account Level" score
-        # For this refactor, let's use the average suspicion score of their trades
-        # PLUS their win rate as a major factor.
-        
-        scores = []
+        # ---- 5. Fetch wallet age (ONCE, not per trade) ----
+        age_days = await self.polygonscan.fetch_wallet_age_days(wallet)
+
+        # ---- 6. Compute Five-Factor Score ----
         total_vol = sum(t["size"] for t in trades)
-        
-        # Group by market for scoring context
-        market_map = {}
-        for t in trades:
-            cid = t.get("conditionId")
-            if cid not in market_map: market_map[cid] = []
-            market_map[cid].append(t)
+        total_markets_traded = len(market_volumes)
 
-        for t in trades:
-            cid = t.get("conditionId")
-            market_vol = sum(x["size"] for x in market_map.get(cid, []))
-            
-            # Compute score for this trade
-            # We lack global context here so N_V might be weak, but N_C, N_M, N_F, N_R work
-            age_days = await self.polygonscan.fetch_wallet_age_days(wallet)
-            
-            # Market Timing
-            nm = 0.0
+        # Find the "primary market" — the one with highest volume
+        primary_market_id = max(market_volumes, key=market_volumes.get)
+        primary_market_vol = market_volumes[primary_market_id]
+
+        # Factor 1: Win Rate Anomaly (requires sample size)
+        f_win_rate = compute_win_rate_anomaly(win_rate, resolved_count)
+
+        # Factor 2: Bet Concentration
+        f_concentration = compute_bet_concentration(primary_market_vol, total_vol)
+
+        # Factor 3: Timing Signal (average across markets with endDate)
+        timing_scores = []
+        for cid, vol in market_volumes.items():
             if cid in resolved_markets:
                 m = resolved_markets[cid]
                 if m.get("endDate"):
                     try:
                         end_dt = datetime.fromisoformat(m["endDate"].replace("Z", "+00:00"))
-                        trade_dt = datetime.fromtimestamp(t.get("timestamp", 0), tz=timezone.utc)
-                        hours = max(0, (end_dt - trade_dt).total_seconds() / 3600)
-                        from app.services.scoring import compute_market_timing
-                        nm = compute_market_timing(hours)
-                    except: pass
-            
-            # Freshness
-            nf = 0.0
-            from app.services.scoring import compute_wallet_freshness
-            if age_days is not None:
-                nf = compute_wallet_freshness(age_days)
-            
-            # Simple concentration
-            from app.services.scoring import compute_topic_concentration
-            nc = compute_topic_concentration(market_vol, total_vol)
-            
-            # Rapid Profit (if applicable)
-            # Hard to compute without full order book history, assume 0 for batch unless we have it
-            nr = 0.0
+                        # Find earliest trade in this market
+                        market_trades = [t for t in trades if t.get("conditionId") == cid]
+                        if market_trades:
+                            earliest = min(t.get("timestamp", 0) for t in market_trades)
+                            trade_dt = datetime.fromtimestamp(earliest, tz=timezone.utc)
+                            hours = max(0, (end_dt - trade_dt).total_seconds() / 3600)
+                            timing_scores.append(compute_timing_signal(hours))
+                    except Exception:
+                        pass
+        f_timing = (sum(timing_scores) / len(timing_scores)) if timing_scores else 0.0
 
-            res = compute_suspicion_score(
-                volume_anomaly=0.0, # specific to real-time stream usually
-                topic_concentration=nc,
-                market_timing=nm,
-                wallet_freshness=nf,
-                rapid_profit=nr,
-                historical_win_rate=win_rate # NEW: Add win rate to score
+        # Factor 4: Entry Price Edge (average across won markets)
+        edge_scores = []
+        for cid, avg_entry in avg_entry_prices.items():
+            market = resolved_markets.get(cid)
+            if market and market.get("closed") and market.get("winner_outcome"):
+                # Determine if wallet won this market
+                winner = market["winner_outcome"]
+                # Check net position: did they hold the winning outcome?
+                market_trades = [t for t in trades if t.get("conditionId") == cid]
+                winner_buys = sum(
+                    t["size"] for t in market_trades
+                    if t.get("side", "").upper() == "BUY" and t.get("outcome") == winner
+                )
+                winner_sells = sum(
+                    t["size"] for t in market_trades
+                    if t.get("side", "").upper() == "SELL" and t.get("outcome") == winner
+                )
+                won = (winner_buys - winner_sells) > 0
+                edge_scores.append(compute_entry_price_edge(avg_entry, won))
+        f_edge = (sum(edge_scores) / len(edge_scores)) if edge_scores else 0.0
+
+        # Factor 5: Account Pattern
+        f_pattern = compute_account_pattern(age_days, total_markets_traded, f_concentration)
+
+        # ---- 7. Compute final score (NO hardcoded overrides) ----
+        result = compute_suspicion_score(
+            win_rate_anomaly=f_win_rate,
+            bet_concentration=f_concentration,
+            timing_signal=f_timing,
+            entry_price_edge=f_edge,
+            account_pattern=f_pattern,
+        )
+
+        # ---- 8. Log detection ----
+        if result.passes_gate:
+            monitor.update(
+                f"🚨 SUSPICIOUS ACCOUNT (Score: {result.score:.0f})",
+                wallet=wallet,
             )
-            scores.append(res.score)
+            await asyncio.sleep(2)
+        elif result.score >= 30:
+            monitor.update(
+                f"🐳 Whale Analyzed (Score: {result.score:.0f}, ${total_profit:,.0f} Profit)",
+                wallet=wallet,
+            )
 
-        avg_score = statistics.mean(scores) if scores else 0.0
-        
-        # 5. Update Database
-        # ONLY if PnL > 10,000 (User Requirement)
-        # We still save "checked" status to avoid re-scanning low-value wallets forever
-        
-        MIN_PNL_THRESHOLD = 10000.0
-
-        if total_profit < MIN_PNL_THRESHOLD:
-             # Mark as scanned but don't save full details/score/alerts
-             # We just insert a basic record so it's in the 'scanned' set
-             db = await get_db()
-             try:
-                 await db.execute(
-                     """
-                     INSERT INTO wallets (address, total_trades, total_volume, risk_score, last_scanned)
-                     VALUES (?, ?, ?, 0, ?)
-                     ON CONFLICT(address) DO UPDATE SET last_scanned = excluded.last_scanned
-                     """,
-                     (wallet, len(trades), total_vol, datetime.now(timezone.utc).isoformat())
-                 )
-                 await db.commit()
-                 # logger.info("Skipped %s (PnL $%.0f < $10k)", wallet, total_profit)
-             finally:
-                 await db.close()
-             return
-
-        # Boost score if Win Rate is high (> 70%) and significant volume
-        if win_rate > 0.7 and len(trades) > 5:
-            avg_score = max(avg_score, 85.0) # High win rate = probable insider
-
-        # User request: "Possible whale found, analyzing trades"
-        monitor.update(f"🐳 Possible Whale Found! (${total_profit:,.0f} Profit)", wallet=wallet)
-        # Specific delay to let the user see the "Whale Found" message
-        await asyncio.sleep(2)
-
+        # ---- 9. Persist to database ----
         analysis_data = {
             "win_rate": win_rate,
             "total_profit": total_profit,
             "total_pnl": total_pnl,
             "trade_count": len(trades),
+            "resolved_markets_count": resolved_count,
+            "markets_traded": total_markets_traded,
+            "max_single_market_position": max_single_market,
+            "account_age_days": age_days,
             "last_updated": datetime.now(timezone.utc).isoformat(),
-            "avg_score": avg_score
+            # Scoring breakdown
+            "score": result.score,
+            "passes_gate": result.passes_gate,
+            "factors": result.to_dict(),
         }
-        
+
         db = await get_db()
         try:
-            # Upsert wallet
             await db.execute(
                 """
-                INSERT INTO wallets (address, total_trades, total_volume, risk_score, analysis_json, last_scanned)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO wallets (address, total_trades, total_volume, risk_score, 
+                                    total_profit, analysis_json, last_scanned)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(address) DO UPDATE SET
                     total_trades = excluded.total_trades,
                     total_volume = excluded.total_volume,
                     risk_score = excluded.risk_score,
+                    total_profit = excluded.total_profit,
                     analysis_json = excluded.analysis_json,
                     last_scanned = excluded.last_scanned
                 """,
                 (
-                    wallet, 
-                    len(trades), 
-                    total_vol, 
-                    avg_score, 
+                    wallet,
+                    len(trades),
+                    total_vol,
+                    result.score,
+                    total_profit,
                     json.dumps(analysis_data),
-                    datetime.now(timezone.utc).isoformat()
-                )
+                    datetime.now(timezone.utc).isoformat(),
+                ),
             )
             await db.commit()
-            logger.info("Analyzed %s: WinRate=%.2f, Score=%.2f, PnL=$%.0f", wallet, win_rate, avg_score, total_profit)
+            logger.info(
+                "Analyzed %s: Score=%.1f WinRate=%.1f%% Profit=$%.0f Resolved=%d",
+                wallet, result.score, win_rate, total_profit, resolved_count,
+            )
         finally:
             await db.close()
 
-        # 6. Generate Alerts if Suspicious
-        # Lower threshold to 15 temporarily to catch the standard 20.0 score wallets
-        ALERT_THRESHOLD = 15.0 
-        
-        if avg_score >= ALERT_THRESHOLD and trades:
-            # Alert on the MOST RECENT trade to populate "Live Feed"
-            latest_trade = trades[0] # trades are ordered by timestamp DESC
-            
-            # Create a ScoringResult object for the alert
-            from app.services.scoring import ScoringResult
-            
-            # We use the breakdown from the latest trade or a summary
-            result = ScoringResult(
-                score=avg_score,
-                historical_win_rate=win_rate,
-                rapid_profit=0.0, # Placeholder
-                volume_anomaly=0.0,
-                topic_concentration=0.0,
-                market_timing=0.0,
-                wallet_freshness=0.0
-            )
-            
+        # ---- 10. Generate alert if suspicious ----
+        if result.passes_gate and trades:
+            latest_trade = trades[0]
             await self._persist_alert(wallet, latest_trade, result)
 
+    async def _mark_scanned(self, wallet: str, trade_count: int, total_vol: float) -> None:
+        """Mark a wallet as scanned without full analysis (below threshold)."""
+        db = await get_db()
+        try:
+            await db.execute(
+                """
+                INSERT INTO wallets (address, total_trades, total_volume, risk_score, last_scanned)
+                VALUES (?, ?, ?, 0, ?)
+                ON CONFLICT(address) DO UPDATE SET last_scanned = excluded.last_scanned
+                """,
+                (wallet, trade_count, total_vol, datetime.now(timezone.utc).isoformat()),
+            )
+            await db.commit()
+        finally:
+            await db.close()
 
     async def _persist_alert(
         self,
         wallet: str,
         trade: dict,
-        result: Any, # ScoringResult
+        result: ScoringResult,
     ) -> None:
         """Store an alert in the database."""
-        # Check if alert already exists for this trade/wallet combo to avoid spam
-        # But for 'Live Feed' we might want updates. 
-        # For now, let's allow latest-trade updates.
-        
         alert_data = {
             "wallet_address": wallet,
             "market_id": trade.get("conditionId", ""),
             "condition_id": trade.get("conditionId", ""),
             "suspicion_score": result.score,
             "factors_json": json.dumps(result.to_dict()),
-            "market_question": trade.get("title", "") or trade.get("marketQuestion", ""),
-            "market_slug": trade.get("slug", ""),
-            "market_end_date": None, # Could fetch if needed
+            "market_question": trade.get("title", "") or trade.get("market_question", ""),
+            "market_slug": trade.get("slug", "") or trade.get("market_slug", ""),
+            "market_end_date": None,
             "trade_size": trade.get("size", 0),
             "trade_side": trade.get("side", ""),
-            "tx_hash": trade.get("transactionHash", ""),
+            "tx_hash": trade.get("transactionHash", "") or trade.get("tx_hash", ""),
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
 
@@ -369,7 +404,7 @@ class AccountAnalyzer:
                 ),
             )
             await db.commit()
-            # logger.info("Generated alert for %s (Score: %.1f)", wallet, result.score)
+            logger.info("Generated alert for %s (Score: %.1f)", wallet, result.score)
         except Exception as e:
             logger.error("Failed to persist alert: %s", e)
         finally:

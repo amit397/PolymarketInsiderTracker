@@ -33,20 +33,18 @@ POLYGONSCAN_API_KEY: str = os.getenv("POLYGONSCAN_API_KEY", "")
 # ---------------------------------------------------------------------------
 # Scoring weights  (must sum to 1.0)
 # ---------------------------------------------------------------------------
-WEIGHT_VOLUME_ANOMALY: float = 0.25
-WEIGHT_TOPIC_CONCENTRATION: float = 0.20
-WEIGHT_MARKET_TIMING: float = 0.15
-WEIGHT_WALLET_FRESHNESS: float = 0.10
-WEIGHT_RAPID_PROFIT: float = 0.05
-WEIGHT_HISTORICAL_WIN_RATE: float = 0.25
+WEIGHT_WIN_RATE_ANOMALY: float = 0.30
+WEIGHT_BET_CONCENTRATION: float = 0.20
+WEIGHT_TIMING_SIGNAL: float = 0.20
+WEIGHT_ENTRY_PRICE_EDGE: float = 0.15
+WEIGHT_ACCOUNT_PATTERN: float = 0.15
 
 SCORING_WEIGHTS: dict[str, float] = {
-    "volume_anomaly": WEIGHT_VOLUME_ANOMALY,
-    "topic_concentration": WEIGHT_TOPIC_CONCENTRATION,
-    "market_timing": WEIGHT_MARKET_TIMING,
-    "wallet_freshness": WEIGHT_WALLET_FRESHNESS,
-    "rapid_profit": WEIGHT_RAPID_PROFIT,
-    "historical_win_rate": WEIGHT_HISTORICAL_WIN_RATE,
+    "win_rate_anomaly": WEIGHT_WIN_RATE_ANOMALY,
+    "bet_concentration": WEIGHT_BET_CONCENTRATION,
+    "timing_signal": WEIGHT_TIMING_SIGNAL,
+    "entry_price_edge": WEIGHT_ENTRY_PRICE_EDGE,
+    "account_pattern": WEIGHT_ACCOUNT_PATTERN,
 }
 
 # ---------------------------------------------------------------------------
@@ -57,10 +55,11 @@ ALERT_MIN_FACTORS_ABOVE: int = 2
 ALERT_FACTOR_THRESHOLD: float = 0.3
 
 # ---------------------------------------------------------------------------
-# Volume Anomaly guards
+# Insider detection thresholds
 # ---------------------------------------------------------------------------
-VOLUME_ANOMALY_MIN_TRADES: int = 10
-VOLUME_ANOMALY_SIGMA_FLOOR: float = 1.0  # prevent division-by-zero
+MIN_RESOLVED_MARKETS: int = 5         # Need ≥5 resolved markets for win rate signal
+WIN_RATE_SIGNIFICANCE: float = 0.80   # 80%+ win rate needed to be notable
+MIN_POSITION_SIZE: float = 10000.0    # Minimum total position in a single market
 
 # ---------------------------------------------------------------------------
 # Market Timing – logarithmic decay

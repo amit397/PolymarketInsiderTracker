@@ -12,7 +12,8 @@ export default function AnalysisStatus() {
     useEffect(() => {
         const fetchStatus = async () => {
             try {
-                const res = await fetch('http://localhost:8000/api/monitor/status');
+                const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:8000";
+                const res = await fetch(`${API_BASE}/api/monitor/status`);
                 if (!res.ok) throw new Error('Failed to fetch status');
                 const data = await res.json();
                 setStatus(data);
