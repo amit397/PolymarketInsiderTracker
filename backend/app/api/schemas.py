@@ -15,6 +15,7 @@ class FactorBreakdown(BaseModel):
     timing_signal: float = 0.0
     entry_price_edge: float = 0.0
     account_pattern: float = 0.0
+    position_size_signal: float = 0.0
     elevated_factors: list[str] = Field(default_factory=list)
 
 

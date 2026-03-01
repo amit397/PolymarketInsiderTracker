@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS trades (
     proxy_wallet     TEXT NOT NULL,
     side             TEXT NOT NULL,
     size             REAL NOT NULL,
+    usdc_size        REAL DEFAULT 0,
     price            REAL NOT NULL,
     outcome          TEXT,
     timestamp        INTEGER NOT NULL,
@@ -76,6 +77,11 @@ CREATE INDEX IF NOT EXISTS idx_alerts_created      ON alerts(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_markets_end_date    ON markets(end_date);
 """
 
+# Migration: add usdc_size column if missing (for existing databases)
+_MIGRATIONS = [
+    "ALTER TABLE trades ADD COLUMN usdc_size REAL DEFAULT 0",
+]
+
 
 async def get_db() -> aiosqlite.Connection:
     """Return a new database connection."""
@@ -92,5 +98,13 @@ async def init_db() -> None:
     try:
         await db.executescript(_SCHEMA)
         await db.commit()
+
+        # Run migrations (ignore errors for already-applied migrations)
+        for migration in _MIGRATIONS:
+            try:
+                await db.execute(migration)
+                await db.commit()
+            except Exception:
+                pass  # Column already exists
     finally:
         await db.close()

@@ -63,7 +63,17 @@ class GammaClient:
         return resp.json()
 
     async def fetch_market_by_id(self, market_id: str) -> dict[str, Any] | None:
-        """Fetch a single market by its Gamma ID."""
+        """Fetch a single market by its Gamma ID or condition_id."""
+        if market_id.startswith("0x"):
+            # It's a conditionId, must use the query parameter
+            resp = await self._client.get("/markets", params={"condition_id": market_id})
+            if resp.status_code == 200:
+                data = resp.json()
+                if isinstance(data, list) and data:
+                    return data[0]
+            return None
+            
+        # It's an internal integer ID
         resp = await self._client.get(f"/markets/{market_id}")
         if resp.status_code == 404:
             return None

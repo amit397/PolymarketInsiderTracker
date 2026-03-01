@@ -1,8 +1,16 @@
 """
-Scanner orchestrator – fetches recent trades, filters, deduplicates,
-and saves them to the database.
+Scanner orchestrator — Market-first discovery.
 
-Scoring and analysis are handled by AccountAnalyzer in a separate pass.
+Two scanning modes:
+  1. Market-first scan (NEW, primary):
+     - Fetches interesting markets from Gamma API (geopolitical, political)
+     - For each market, fetches ALL trades via server-side `market=` filter
+     - Aggregates per-wallet USDC volume
+     - Saves trades + identifies wallets for deep analysis
+
+  2. Legacy global-feed scan (kept for backward compat):
+     - Fetches recent trades from the global feed
+     - Filters by market type and size
 """
 
 from __future__ import annotations
@@ -16,6 +24,10 @@ from typing import Any
 from app.core.config import (
     MIN_TRADE_SIZE,
     SCAN_LOOKBACK_HOURS,
+    SCAN_MARKET_HOURS_AHEAD,
+    SCAN_MARKET_MIN_VOLUME,
+    SCAN_MARKET_MAX_PAGES,
+    MIN_POSITION_SIZE,
 )
 from app.core.database import get_db
 from app.core.monitor import monitor
@@ -28,7 +40,7 @@ logger = logging.getLogger(__name__)
 
 
 class Scanner:
-    """Main scanning orchestrator — ingests trades only."""
+    """Main scanning orchestrator — market-first discovery."""
 
     def __init__(
         self,
@@ -48,7 +60,144 @@ class Scanner:
             await self.polygonscan.close()
 
     # ------------------------------------------------------------------
-    # Historical Scan (Whale Watching)
+    # PRIMARY: Market-first scan
+    # ------------------------------------------------------------------
+
+    async def run_scan(
+        self,
+        lookback_hours: int = SCAN_LOOKBACK_HOURS,
+    ) -> list[dict[str, Any]]:
+        """
+        Market-first scan:
+        1. Fetch active markets of interest (geopolitical, political, etc.)
+        2. For each market, fetch all trades via server-side market= filter
+        3. Save trades and identify wallet candidates for deep analysis
+        """
+        logger.info("═══ Starting market-first scan ═══")
+        monitor.update("Fetching Interesting Markets")
+
+        # 1. Fetch interesting markets from Gamma API
+        try:
+            markets = await self.gamma.fetch_expiring_markets(
+                hours_ahead=SCAN_MARKET_HOURS_AHEAD,
+                min_volume=SCAN_MARKET_MIN_VOLUME,
+            )
+        except Exception as e:
+            logger.error("Failed to fetch markets: %s", e)
+            markets = []
+
+        if not markets:
+            logger.info("No interesting markets found")
+            return []
+
+        # 2. Filter to scannable markets (skip crypto/sports/entertainment)
+        scannable = []
+        for m in markets:
+            slug = m.get("slug", "")
+            question = m.get("question", "")
+            cls = classify_market(slug, question)
+            if cls.should_scan:
+                scannable.append(m)
+
+        logger.info(
+            "Found %d scannable markets out of %d total",
+            len(scannable), len(markets),
+        )
+
+        if not scannable:
+            logger.info("No scannable markets after filtering")
+            return []
+
+        # 3. For each market, fetch trades and save them
+        seen_hashes = await self._get_seen_tx_hashes()
+        total_saved = 0
+        wallet_candidates: set[str] = set()
+        
+        # Sort markets by volume descending instead of resolving soonest
+        # so we always prioritize the biggest markets
+        scannable.sort(key=lambda m: m.get("volumeNum", 0), reverse=True)
+
+        for i, market in enumerate(scannable[:50]):  # Cap at 50 highest volume markets per cycle
+            condition_id = market.get("conditionId", "")
+            question = market.get("question", "")
+            slug = market.get("slug", "")
+
+            if not condition_id:
+                continue
+
+            monitor.update(
+                f"Scanning Market ({i+1}/{min(len(scannable), 50)})",
+                stats={"market": question[:60]},
+            )
+
+            try:
+                trades = await self.data.fetch_market_trades(
+                    condition_id, max_pages=SCAN_MARKET_MAX_PAGES,
+                )
+            except Exception as e:
+                logger.error("Failed to scan market %s: %s", condition_id[:16], e)
+                continue
+
+            if not trades:
+                continue
+
+            # Sanitize + dedup + aggregate
+            new_trades = []
+            wallet_volumes: dict[str, float] = defaultdict(float)
+
+            for t in trades:
+                # Sanitize types
+                try:
+                    t["size"] = float(t.get("size", 0))
+                    t["price"] = float(t.get("price", 0))
+                except (ValueError, TypeError):
+                    t["size"] = 0.0
+                    t["price"] = 0.0
+
+                # Calculate USDC value (size * price)
+                usdc_val = t["size"] * t["price"]
+
+                # Track per-wallet USDC volume
+                wallet = t.get("proxyWallet", "")
+                if wallet:
+                    wallet_volumes[wallet] += usdc_val
+
+                # Dedup
+                tx = t.get("transactionHash")
+                if tx and tx not in seen_hashes:
+                    t["_usdc_size"] = usdc_val
+                    t["_slug"] = slug
+                    t["_question"] = question
+                    new_trades.append(t)
+                    seen_hashes.add(tx)
+
+            # Save new trades
+            if new_trades:
+                await self._save_processed_trades(new_trades)
+                total_saved += len(new_trades)
+
+            # Identify wallet candidates (those with notable USDC positions)
+            for wallet, vol in wallet_volumes.items():
+                if vol >= MIN_POSITION_SIZE:
+                    wallet_candidates.add(wallet)
+
+            logger.info(
+                "Market '%s': %d trades, %d new, %d notable wallets",
+                question[:40], len(trades), len(new_trades),
+                sum(1 for v in wallet_volumes.values() if v >= MIN_POSITION_SIZE),
+            )
+
+            # Rate limit between markets
+            await asyncio.sleep(0.3)
+
+        logger.info(
+            "Market-first scan complete: %d trades saved, %d wallet candidates",
+            total_saved, len(wallet_candidates),
+        )
+        return []
+
+    # ------------------------------------------------------------------
+    # Historical Scan (Whale Watching) — kept for backward compat
     # ------------------------------------------------------------------
 
     async def scan_history(
@@ -56,16 +205,9 @@ class Scanner:
         lookback_pages: int = 1000,
         min_size: float = MIN_TRADE_SIZE,
     ) -> int:
-        """
-        Backfill trades by scanning backwards in the global feed.
-        Filters for large trades only ($10K+) to populate the database.
-        Returns number of trades saved.
-        """
+        """Backfill trades by scanning the global feed."""
         monitor.update("Running Historical Scan", stats={"pages": lookback_pages})
-        logger.info(
-            "Starting historical whale scan (pages=%d, min_size=%.0f)",
-            lookback_pages, min_size
-        )
+        logger.info("Starting historical scan (pages=%d)", lookback_pages)
 
         seen_hashes = await self._get_seen_tx_hashes()
         total_saved = 0
@@ -75,28 +217,29 @@ class Scanner:
             try:
                 trades = await self.data.fetch_trades(
                     limit=batch_size,
-                    offset=page * batch_size
+                    offset=page * batch_size,
                 )
             except Exception as e:
-                logger.error("Failed to fetch historical page %d: %s", page, e)
+                logger.error("Historical page %d failed: %s", page, e)
                 continue
 
             if not trades:
-                logger.info("Historical scan ended early at page %d (no data)", page)
                 break
 
-            # Filter: sanitize, enforce min size, dedup
             valid_trades = []
             for t in trades:
                 try:
-                    size = float(t.get("size", 0))
-                    t["size"] = size
+                    t["size"] = float(t.get("size", 0))
+                    t["price"] = float(t.get("price", 0))
                 except (ValueError, TypeError):
                     t["size"] = 0.0
+                    t["price"] = 0.0
 
-                if t["size"] >= min_size:
+                usdc_val = t["size"] * t["price"]
+                if usdc_val >= min_size:
                     tx = t.get("transactionHash")
                     if tx and tx not in seen_hashes:
+                        t["_usdc_size"] = usdc_val
                         valid_trades.append(t)
                         seen_hashes.add(tx)
 
@@ -105,112 +248,17 @@ class Scanner:
                 total_saved += len(valid_trades)
 
             if page % 10 == 0:
-                monitor.update("Historical Scan", stats={"page": page, "total_saved": total_saved})
-                logger.info("Historical scan: Page %d/%d, Saved %d so far", page, lookback_pages, total_saved)
+                monitor.update("Historical Scan", stats={"page": page, "saved": total_saved})
                 await asyncio.sleep(0.1)
 
-        logger.info("Historical scan complete. Total NEW trades saved: %d", total_saved)
+        logger.info("Historical scan complete: %d trades saved", total_saved)
         return total_saved
 
     # ------------------------------------------------------------------
-    # Main scan entry point
-    # ------------------------------------------------------------------
-
-    async def run_scan(
-        self,
-        lookback_hours: int = SCAN_LOOKBACK_HOURS,
-    ) -> list[dict[str, Any]]:
-        """
-        Scan recent trades, filter, deduplicate, and persist.
-
-        Filters applied:
-          1. Market type — skip crypto-price, sports, entertainment
-          2. Trade size — skip trades under MIN_TRADE_SIZE ($10,000)
-          3. Deduplication — skip already-seen tx hashes
-
-        Returns empty list (scoring is handled by AccountAnalyzer).
-        """
-        since_ts = int(time.time()) - (lookback_hours * 3600)
-        logger.info("Starting scan – trades since %s", since_ts)
-        monitor.update("Fetching Recent Trades", stats={"lookback_hours": lookback_hours})
-
-        # 1. Fetch recent trades
-        trades = await self.data.fetch_recent_trades(since_ts)
-        logger.info("Fetched %d raw trades", len(trades))
-
-        # Sanitize types (API sometimes returns strings)
-        for t in trades:
-            try:
-                t["size"] = float(t.get("size", 0))
-                t["price"] = float(t.get("price", 0))
-            except (ValueError, TypeError):
-                t["size"] = 0.0
-                t["price"] = 0.0
-
-        if not trades:
-            return []
-
-        # 2. Dedup: skip trades already processed (by tx_hash)
-        seen_hashes = await self._get_seen_tx_hashes()
-        before_dedup = len(trades)
-        trades = [
-            t for t in trades
-            if t.get("transactionHash") and t["transactionHash"] not in seen_hashes
-        ]
-        logger.info(
-            "After dedup: %d / %d trades are new",
-            len(trades), before_dedup,
-        )
-        if not trades:
-            logger.info("No new trades – scan cycle complete")
-            return []
-
-        # 3. Filter: market type (skip crypto/sports/entertainment)
-        filtered_trades: list[dict] = []
-        skipped_counts: dict[str, int] = defaultdict(int)
-        for trade in trades:
-            slug = trade.get("slug", "")
-            title = trade.get("title", "")
-            cls = classify_market(slug, title)
-            if cls.should_scan:
-                filtered_trades.append(trade)
-            else:
-                skipped_counts[cls.category] += 1
-
-        for cat, cnt in skipped_counts.items():
-            logger.info("Skipped %d trades (market type: %s)", cnt, cat)
-        logger.info(
-            "After market-type filter: %d / %d trades remain",
-            len(filtered_trades), len(trades),
-        )
-
-        # 4. Filter: minimum trade size ($10,000)
-        size_before = len(filtered_trades)
-        filtered_trades = [
-            t for t in filtered_trades
-            if t.get("size", 0) >= MIN_TRADE_SIZE
-        ]
-        logger.info(
-            "After min-size filter ($%.0f): %d / %d trades remain",
-            MIN_TRADE_SIZE, len(filtered_trades), size_before,
-        )
-
-        if not filtered_trades:
-            logger.info("No trades passed filters – scan complete")
-            return []
-
-        # 5. Save all filtered trades
-        await self._save_processed_trades(filtered_trades)
-        logger.info("Ingestion complete – %d trades saved", len(filtered_trades))
-
-        return []
-
-    # ------------------------------------------------------------------
-    # Trade deduplication
+    # Helpers
     # ------------------------------------------------------------------
 
     async def _get_seen_tx_hashes(self) -> set[str]:
-        """Return the set of tx_hashes already stored in the trades table."""
         db = await get_db()
         try:
             cursor = await db.execute("SELECT tx_hash FROM trades WHERE tx_hash IS NOT NULL")
@@ -220,7 +268,6 @@ class Scanner:
             await db.close()
 
     async def _save_processed_trades(self, trades: list[dict[str, Any]]) -> None:
-        """Persist processed trades so they are skipped in future cycles."""
         if not trades:
             return
         db = await get_db()
@@ -229,27 +276,27 @@ class Scanner:
                 """
                 INSERT OR IGNORE INTO trades
                     (condition_id, market_slug, proxy_wallet, side, size,
-                     price, outcome, timestamp, tx_hash, market_question)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     usdc_size, price, outcome, timestamp, tx_hash, market_question)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     (
                         t.get("conditionId", ""),
-                        t.get("slug", ""),
+                        t.get("_slug", t.get("slug", "")),
                         t.get("proxyWallet", ""),
                         t.get("side", ""),
                         t.get("size", 0),
+                        t.get("_usdc_size", t.get("size", 0) * t.get("price", 0)),
                         t.get("price", 0),
                         t.get("outcome", ""),
                         t.get("timestamp", 0),
                         t.get("transactionHash", ""),
-                        t.get("title", ""),
+                        t.get("_question", t.get("title", "")),
                     )
                     for t in trades
                     if t.get("transactionHash")
                 ],
             )
             await db.commit()
-            logger.info("Saved %d processed trades to DB", len(trades))
         finally:
             await db.close()

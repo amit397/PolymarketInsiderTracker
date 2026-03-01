@@ -1,15 +1,9 @@
 """
-Account Analyzer Service — Redesigned.
+Account Analyzer Service — Redesigned v2.
 
-Iterates through known wallets and analyzes their trading history to identify
-potential insiders using the five-factor scoring system.
-
-Key design principles:
-  - Only considers wallets with ≥$10K position in at least one market
-  - Requires statistical significance (≥5 resolved markets) for win rate signal
-  - No arbitrary hardcoded score overrides
-  - Single Polygonscan call per wallet (not per trade)
-  - Uses net-position-based PnL, not "last intent" heuristic
+Market-first approach: analyzes wallets discovered through targeted
+market scanning. Uses server-side API filters for trade fetching and
+the six-factor scoring system with boosted fresh-account + position-size signals.
 """
 
 from __future__ import annotations
@@ -36,6 +30,7 @@ from app.services.scoring import (
     ScoringResult,
     compute_bet_concentration,
     compute_entry_price_edge,
+    compute_position_size_signal,
     compute_win_rate_anomaly,
     compute_timing_signal,
     compute_account_pattern,
@@ -69,38 +64,38 @@ class AccountAnalyzer:
     async def analyze_all_wallets(self) -> None:
         """
         Iterate through all unique wallets in the 'trades' table and analyze them.
-        Updates the 'wallets' table with risk scores and stats.
-        
-        Only analyzes wallets that have ≥$10K total position in at least one market.
+        Uses USDC-based position sizes (usdc_size column) for thresholds.
         """
         logger.info("Starting systematic account analysis...")
         monitor.update("Starting Account Analysis Cycle")
 
         db = await get_db()
         try:
-            # Get wallets with ≥$10K in at least one market (aggregated by market)
+            # Get wallets with notable USDC positions in at least one market
+            # Use usdc_size if available, else fall back to size * price
             cursor = await db.execute("""
-                SELECT proxy_wallet, condition_id, SUM(size) as market_total
+                SELECT proxy_wallet, condition_id,
+                       SUM(CASE WHEN usdc_size > 0 THEN usdc_size ELSE size * price END) as market_usdc
                 FROM trades 
                 WHERE proxy_wallet IS NOT NULL AND proxy_wallet != ''
                 GROUP BY proxy_wallet, condition_id
-                HAVING SUM(size) >= ?
+                HAVING market_usdc >= ?
             """, (MIN_POSITION_SIZE,))
             rows = await cursor.fetchall()
             whale_wallets = {row[0] for row in rows}
 
-            # Get already scanned (set of addresses)
+            # Get already scanned
             cursor = await db.execute("SELECT address FROM wallets")
             rows = await cursor.fetchall()
             scanned = {row[0] for row in rows}
 
-            # New wallets not yet analyzed
+            # New wallets
             new_wallets = list(whale_wallets - scanned)
 
             # Stale whales: already scanned, notable score, not checked in 24h
             cursor = await db.execute("""
                 SELECT address FROM wallets 
-                WHERE risk_score >= 20
+                WHERE risk_score >= 15
                 AND last_scanned < datetime('now', '-1 day')
             """)
             rows = await cursor.fetchall()
@@ -143,12 +138,12 @@ class AccountAnalyzer:
         monitor.update("Idle", wallet=None, stats={"last_cycle_wallets": len(wallets)})
 
     async def analyze_wallet(self, wallet: str) -> None:
-        """Perform deep analysis on a single wallet using the five-factor scoring system."""
+        """Perform deep analysis on a single wallet using the six-factor scoring system."""
 
-        # ---- 1. Enrich: fetch wallet's full trade history from API ----
+        # ---- 1. Enrich: fetch wallet's full trade history via server-side filter ----
         await self._enrich_wallet_history(wallet)
 
-        # ---- 2. Load all trades from local DB (including enriched ones) ----
+        # ---- 2. Load all trades from local DB ----
         db = await get_db()
         try:
             cursor = await db.execute(
@@ -163,6 +158,7 @@ class AccountAnalyzer:
                 t["transactionHash"] = t["tx_hash"]
                 t["size"] = float(t["size"])
                 t["price"] = float(t["price"])
+                t["usdc_size"] = float(t.get("usdc_size", 0) or 0)
                 t["title"] = t.get("market_question", "")
                 trades.append(t)
         finally:
@@ -172,21 +168,28 @@ class AccountAnalyzer:
             logger.info("No trades found for %s in local DB", wallet)
             return
 
-        # ---- 3. Check $10K position threshold (per-market) ----
-        market_volumes: dict[str, float] = defaultdict(float)
+        # ---- 3. Compute USDC-based volumes per market ----
+        market_usdc_volumes: dict[str, float] = defaultdict(float)
+        market_share_volumes: dict[str, float] = defaultdict(float)
+        market_prices: dict[str, list[float]] = defaultdict(list)
         for t in trades:
             cid = t.get("conditionId")
             if cid:
-                market_volumes[cid] += t["size"]
+                usdc = t["usdc_size"] if t["usdc_size"] > 0 else t["size"] * t["price"]
+                market_usdc_volumes[cid] += usdc
+                market_share_volumes[cid] += t["size"]
+                if t["price"] > 0 and t.get("side", "").upper() == "BUY":
+                    market_prices[cid].append(t["price"])
 
-        max_single_market = max(market_volumes.values()) if market_volumes else 0.0
-        if max_single_market < MIN_POSITION_SIZE:
-            # Mark as scanned but skip detailed analysis
-            await self._mark_scanned(wallet, len(trades), sum(t["size"] for t in trades))
+        total_usdc = sum(market_usdc_volumes.values())
+        max_single_market_usdc = max(market_usdc_volumes.values()) if market_usdc_volumes else 0.0
+
+        if max_single_market_usdc < MIN_POSITION_SIZE:
+            await self._mark_scanned(wallet, len(trades), total_usdc)
             return
 
-        # ---- 3. Fetch market resolution data ----
-        market_ids = list(market_volumes.keys())
+        # ---- 4. Fetch market resolution data ----
+        market_ids = list(market_usdc_volumes.keys())
         resolved_markets: dict[str, dict[str, Any]] = {}
         for mid in market_ids:
             if not mid:
@@ -198,7 +201,7 @@ class AccountAnalyzer:
             except Exception:
                 pass
 
-        # ---- 4. Calculate PnL / Win Rate (net-position based) ----
+        # ---- 5. Calculate PnL / Win Rate ----
         pnl_stats = self.pnl_calculator.calculate_stats(trades, resolved_markets)
         win_rate = pnl_stats.get("win_rate", 0.0)
         total_profit = pnl_stats.get("total_profit", 0.0)
@@ -206,32 +209,42 @@ class AccountAnalyzer:
         resolved_count = pnl_stats.get("resolved_markets_count", 0)
         avg_entry_prices = pnl_stats.get("avg_entry_prices", {})
 
-        # ---- 5. Fetch wallet age (ONCE, not per trade) ----
+        # ---- 6. Fetch wallet age + profile ----
         age_days = await self.polygonscan.fetch_wallet_age_days(wallet)
+        profile = await self.gamma.fetch_public_profile(wallet)
+        username = None
+        if profile:
+            username = profile.get("name") or profile.get("pseudonym")
+            if age_days is None and profile.get("createdAt"):
+                try:
+                    created = datetime.fromisoformat(
+                        profile["createdAt"].replace("Z", "+00:00")
+                    )
+                    age_days = (datetime.now(timezone.utc) - created).total_seconds() / 86400
+                except Exception:
+                    pass
 
-        # ---- 6. Compute Five-Factor Score ----
-        total_vol = sum(t["size"] for t in trades)
-        total_markets_traded = len(market_volumes)
+        # ---- 7. Compute Six-Factor Score ----
+        total_markets_traded = len(market_usdc_volumes)
 
-        # Find the "primary market" — the one with highest volume
-        primary_market_id = max(market_volumes, key=market_volumes.get)
-        primary_market_vol = market_volumes[primary_market_id]
+        # Primary market = highest USDC volume
+        primary_market_id = max(market_usdc_volumes, key=market_usdc_volumes.get)
+        primary_market_usdc = market_usdc_volumes[primary_market_id]
 
-        # Factor 1: Win Rate Anomaly (requires sample size)
+        # Factor 1: Win Rate Anomaly (confidence-weighted)
         f_win_rate = compute_win_rate_anomaly(win_rate, resolved_count)
 
-        # Factor 2: Bet Concentration
-        f_concentration = compute_bet_concentration(primary_market_vol, total_vol)
+        # Factor 2: Bet Concentration (using USDC volumes)
+        f_concentration = compute_bet_concentration(primary_market_usdc, total_usdc)
 
-        # Factor 3: Timing Signal (average across markets with endDate)
+        # Factor 3: Timing Signal
         timing_scores = []
-        for cid, vol in market_volumes.items():
+        for cid, vol in market_usdc_volumes.items():
             if cid in resolved_markets:
                 m = resolved_markets[cid]
                 if m.get("endDate"):
                     try:
                         end_dt = datetime.fromisoformat(m["endDate"].replace("Z", "+00:00"))
-                        # Find earliest trade in this market
                         market_trades = [t for t in trades if t.get("conditionId") == cid]
                         if market_trades:
                             earliest = min(t.get("timestamp", 0) for t in market_trades)
@@ -242,14 +255,12 @@ class AccountAnalyzer:
                         pass
         f_timing = (sum(timing_scores) / len(timing_scores)) if timing_scores else 0.0
 
-        # Factor 4: Entry Price Edge (average across won markets)
+        # Factor 4: Entry Price Edge
         edge_scores = []
         for cid, avg_entry in avg_entry_prices.items():
             market = resolved_markets.get(cid)
             if market and market.get("closed") and market.get("winner_outcome"):
-                # Determine if wallet won this market
                 winner = market["winner_outcome"]
-                # Check net position: did they hold the winning outcome?
                 market_trades = [t for t in trades if t.get("conditionId") == cid]
                 winner_buys = sum(
                     t["size"] for t in market_trades
@@ -263,32 +274,41 @@ class AccountAnalyzer:
                 edge_scores.append(compute_entry_price_edge(avg_entry, won))
         f_edge = (sum(edge_scores) / len(edge_scores)) if edge_scores else 0.0
 
-        # Factor 5: Account Pattern
+        # Factor 5: Account Pattern (boosted freshness)
         f_pattern = compute_account_pattern(age_days, total_markets_traded, f_concentration)
 
-        # ---- 7. Compute final score (NO hardcoded overrides) ----
+        # Factor 6: Position Size Signal (NEW — large USDC on low-odds outcomes)
+        # Use the primary market's avg entry price
+        primary_prices = market_prices.get(primary_market_id, [])
+        primary_avg_price = (
+            sum(primary_prices) / len(primary_prices) if primary_prices else 0.5
+        )
+        f_position = compute_position_size_signal(primary_market_usdc, primary_avg_price)
+
+        # ---- 8. Compute final score ----
         result = compute_suspicion_score(
             win_rate_anomaly=f_win_rate,
             bet_concentration=f_concentration,
             timing_signal=f_timing,
             entry_price_edge=f_edge,
             account_pattern=f_pattern,
+            position_size_signal=f_position,
         )
 
-        # ---- 8. Log detection ----
+        # ---- 9. Log detection ----
         if result.passes_gate:
             monitor.update(
                 f"🚨 SUSPICIOUS ACCOUNT (Score: {result.score:.0f})",
                 wallet=wallet,
             )
             await asyncio.sleep(2)
-        elif result.score >= 30:
+        elif result.score >= 20:
             monitor.update(
-                f"🐳 Whale Analyzed (Score: {result.score:.0f}, ${total_profit:,.0f} Profit)",
+                f"🐳 Analyzed (Score: {result.score:.0f}, ${total_profit:,.0f} Profit)",
                 wallet=wallet,
             )
 
-        # ---- 9. Persist to database ----
+        # ---- 10. Persist to database ----
         analysis_data = {
             "win_rate": win_rate,
             "total_profit": total_profit,
@@ -296,10 +316,11 @@ class AccountAnalyzer:
             "trade_count": len(trades),
             "resolved_markets_count": resolved_count,
             "markets_traded": total_markets_traded,
-            "max_single_market_position": max_single_market,
+            "max_single_market_usdc": max_single_market_usdc,
+            "total_usdc_invested": total_usdc,
             "account_age_days": age_days,
+            "username": username,
             "last_updated": datetime.now(timezone.utc).isoformat(),
-            # Scoring breakdown
             "score": result.score,
             "passes_gate": result.passes_gate,
             "factors": result.to_dict(),
@@ -309,10 +330,11 @@ class AccountAnalyzer:
         try:
             await db.execute(
                 """
-                INSERT INTO wallets (address, total_trades, total_volume, risk_score, 
+                INSERT INTO wallets (address, username, total_trades, total_volume, risk_score, 
                                     total_profit, analysis_json, last_scanned)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(address) DO UPDATE SET
+                    username = excluded.username,
                     total_trades = excluded.total_trades,
                     total_volume = excluded.total_volume,
                     risk_score = excluded.risk_score,
@@ -322,8 +344,9 @@ class AccountAnalyzer:
                 """,
                 (
                     wallet,
+                    username,
                     len(trades),
-                    total_vol,
+                    total_usdc,
                     result.score,
                     total_profit,
                     json.dumps(analysis_data),
@@ -332,19 +355,19 @@ class AccountAnalyzer:
             )
             await db.commit()
             logger.info(
-                "Analyzed %s: Score=%.1f WinRate=%.1f%% Profit=$%.0f Resolved=%d",
-                wallet, result.score, win_rate, total_profit, resolved_count,
+                "Analyzed %s (%s): Score=%.1f WinRate=%.1f%% USDC=$%.0f Age=%s",
+                wallet, username or "anon", result.score, win_rate,
+                total_usdc, f"{age_days:.0f}d" if age_days else "unknown",
             )
         finally:
             await db.close()
 
-        # ---- 10. Generate alert if suspicious ----
+        # ---- 11. Generate alert if suspicious ----
         if result.passes_gate and trades:
             latest_trade = trades[0]
             await self._persist_alert(wallet, latest_trade, result)
 
-    async def _mark_scanned(self, wallet: str, trade_count: int, total_vol: float) -> None:
-        """Mark a wallet as scanned without full analysis (below threshold)."""
+    async def _mark_scanned(self, wallet: str, trade_count: int, total_usdc: float) -> None:
         db = await get_db()
         try:
             await db.execute(
@@ -353,7 +376,7 @@ class AccountAnalyzer:
                 VALUES (?, ?, ?, 0, ?)
                 ON CONFLICT(address) DO UPDATE SET last_scanned = excluded.last_scanned
                 """,
-                (wallet, trade_count, total_vol, datetime.now(timezone.utc).isoformat()),
+                (wallet, trade_count, total_usdc, datetime.now(timezone.utc).isoformat()),
             )
             await db.commit()
         finally:
@@ -365,7 +388,6 @@ class AccountAnalyzer:
         trade: dict,
         result: ScoringResult,
     ) -> None:
-        """Store an alert in the database."""
         alert_data = {
             "wallet_address": wallet,
             "market_id": trade.get("conditionId", ""),
@@ -415,37 +437,20 @@ class AccountAnalyzer:
 
     async def _enrich_wallet_history(self, wallet: str) -> None:
         """
-        Fetch the wallet's full trade history from the Data API and save
-        any new trades to the local DB. This gives the scoring system
-        enough data to compute win rates, entry prices, and PnL.
+        Fetch the wallet's full trade history using server-side `user=` filter
+        and save new trades to local DB.
+        
+        No longer has a 10-trade cap — always enriches to get complete history.
         """
-        # Check if we've already enriched this wallet recently
-        db = await get_db()
-        try:
-            cursor = await db.execute(
-                "SELECT COUNT(*) FROM trades WHERE proxy_wallet = ?",
-                (wallet,),
-            )
-            existing_count = (await cursor.fetchone())[0]
-        finally:
-            await db.close()
-
-        # If wallet already has 10+ trades, skip enrichment (already done)
-        if existing_count >= 10:
-            return
-
-        logger.info("Enriching trade history for %s (currently %d trades)", wallet, existing_count)
+        logger.info("Enriching trade history for %s", wallet)
 
         try:
-            api_trades = await self.data.fetch_wallet_trades(
-                wallet, max_pages=50
-            )
+            api_trades = await self.data.fetch_wallet_trades(wallet, max_pages=50)
         except Exception as e:
             logger.warning("Failed to fetch history for %s: %s", wallet, e)
             return
 
         if not api_trades:
-            logger.info("No API trades found for %s", wallet)
             return
 
         # Get existing tx hashes to avoid duplicates
@@ -461,12 +466,13 @@ class AccountAnalyzer:
             for t in api_trades:
                 tx = t.get("transactionHash", "")
                 if tx and tx not in existing_hashes:
-                    # Sanitize types
                     try:
                         size = float(t.get("size", 0))
                         price = float(t.get("price", 0))
                     except (ValueError, TypeError):
                         continue
+
+                    usdc_size = size * price  # Compute USDC value
 
                     new_trades.append((
                         t.get("conditionId", ""),
@@ -474,6 +480,7 @@ class AccountAnalyzer:
                         t.get("proxyWallet", wallet),
                         t.get("side", ""),
                         size,
+                        usdc_size,
                         price,
                         t.get("outcome", ""),
                         t.get("timestamp", 0),
@@ -486,20 +493,14 @@ class AccountAnalyzer:
                     """
                     INSERT OR IGNORE INTO trades
                         (condition_id, market_slug, proxy_wallet, side, size,
-                         price, outcome, timestamp, tx_hash, market_question)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         usdc_size, price, outcome, timestamp, tx_hash, market_question)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     new_trades,
                 )
                 await db.commit()
-                logger.info(
-                    "Enriched %s with %d new trades (was %d, now %d)",
-                    wallet, len(new_trades), existing_count, existing_count + len(new_trades),
-                )
-            else:
-                logger.info("No new trades to enrich for %s", wallet)
+                logger.info("Enriched %s with %d new trades", wallet, len(new_trades))
         except Exception as e:
             logger.error("Error enriching wallet %s: %s", wallet, e)
         finally:
             await db.close()
-

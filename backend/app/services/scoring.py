@@ -1,12 +1,17 @@
 """
-Suspicion-score calculator — Redesigned.
+Suspicion-score calculator — Redesigned v2.
 
-Five-factor formula focused on statistically meaningful insider signals:
-  1. Win Rate Anomaly    (30%) — deviation from 50% baseline, requires sample size
-  2. Bet Concentration   (20%) — single-market concentration ratio
-  3. Timing Signal       (20%) — logarithmic decay proximity to resolution
-  4. Entry Price Edge    (15%) — did they buy at extreme undervalued odds?
-  5. Account Pattern     (15%) — fresh + single-purpose + low diversification
+Six-factor formula focused on detecting insider trading patterns:
+  1. Win Rate Anomaly       (15%) — deviation from 50% baseline, confidence-weighted
+  2. Bet Concentration      (15%) — single-market concentration ratio
+  3. Timing Signal          (10%) — logarithmic decay proximity to resolution
+  4. Entry Price Edge       (15%) — buying at extreme undervalued odds and winning
+  5. Account Pattern        (20%) — fresh + single-purpose + low diversification
+  6. Position Size Signal   (25%) — NEW: large USDC on low-odds outcomes
+
+The account_pattern and position_size_signal factors together account for 45% of
+the score, heavily penalising the classic insider pattern: brand-new account
+dumps thousands of dollars on a low-probability geopolitical event.
 """
 
 from __future__ import annotations
@@ -18,10 +23,15 @@ from app.core.config import (
     ALERT_FACTOR_THRESHOLD,
     ALERT_MIN_FACTORS_ABOVE,
     ALERT_MIN_SCORE,
+    FRESH_ACCOUNT_FULL_SIGNAL_DAYS,
+    FRESH_ACCOUNT_MAX_DAYS,
+    LOW_ODDS_PRICE_THRESHOLD,
     MARKET_TIMING_MAX_HOURS,
     MIN_RESOLVED_MARKETS,
-    WIN_RATE_SIGNIFICANCE,
+    POSITION_SIZE_HIGH_THRESHOLD,
+    POSITION_SIZE_SUSPICIOUS_THRESHOLD,
     SCORING_WEIGHTS,
+    WIN_RATE_SIGNIFICANCE,
 )
 
 
@@ -36,20 +46,25 @@ def compute_win_rate_anomaly(
     """
     How far above the 50% random baseline the wallet's win rate is.
 
-    Returns 0.0 if fewer than MIN_RESOLVED_MARKETS are resolved (insufficient
-    sample size to draw conclusions on binary markets).
+    Now uses CONFIDENCE WEIGHTING for small sample sizes:
+      - 1 resolved market: 20% confidence
+      - 3 resolved markets: 60% confidence
+      - 5+ resolved markets: 100% confidence
 
-    For win_rate_pct in [0, 100]:
-      - 50% → 0.0
-      - 80% → 0.6
-      - 100% → 1.0
+    This means a 100% win rate on 1 market returns 0.20, not 0.0.
     """
-    if resolved_markets < MIN_RESOLVED_MARKETS:
+    if resolved_markets < 1:
         return 0.0
-    win_rate = win_rate_pct / 100.0  # Convert to 0-1 range
+
+    # Confidence discount for small sample sizes
+    confidence = min(1.0, resolved_markets / 5.0)
+
+    win_rate = win_rate_pct / 100.0
     if win_rate <= 0.5:
         return 0.0
-    return min(1.0, (win_rate - 0.5) / 0.5)
+
+    raw = min(1.0, (win_rate - 0.5) / 0.5)
+    return raw * confidence
 
 
 def compute_bet_concentration(
@@ -131,20 +146,34 @@ def compute_account_pattern(
     """
     Combined account pattern signal: fresh + single-purpose + low diversification.
 
+    BOOSTED freshness scoring for very new accounts:
+      - < 7 days → 1.0 (maximum suspicion)
+      - 7-30 days → 0.5-1.0 (high suspicion)
+      - 30-365 days → linear decay to 0.0
+
     Components:
-      - Freshness: 0-day wallet → 1.0, 365-day → 0.0
+      - Freshness: weighted 50% of this factor (up from 33%)
       - Single-purpose: trading ≤ 2 markets → 1.0, ≥ 10 markets → 0.0
       - Concentration: passed through directly (already 0-1)
-
-    Returns average of available components.
     """
     signals = []
+    weights = []
 
-    # Freshness score
+    # Freshness score — boosted weight (50% of this factor)
     if age_days is not None:
-        freshness = max(0.0, 1.0 - min(age_days, 365.0) / 365.0)
+        if age_days <= FRESH_ACCOUNT_FULL_SIGNAL_DAYS:
+            freshness = 1.0  # Brand-new account = maximum signal
+        elif age_days <= FRESH_ACCOUNT_MAX_DAYS:
+            # Linear decay from 1.0 to 0.5 over 7-30 day range
+            freshness = 1.0 - 0.5 * (
+                (age_days - FRESH_ACCOUNT_FULL_SIGNAL_DAYS)
+                / (FRESH_ACCOUNT_MAX_DAYS - FRESH_ACCOUNT_FULL_SIGNAL_DAYS)
+            )
+        else:
+            freshness = max(0.0, 1.0 - min(age_days, 365.0) / 365.0)
         signals.append(freshness)
-
+        weights.append(2.0)  # Double weight for freshness
+    
     # Single-purpose score (few markets traded)
     if total_markets_traded <= 2:
         signals.append(1.0)
@@ -152,13 +181,58 @@ def compute_account_pattern(
         signals.append(0.0)
     else:
         signals.append(1.0 - (total_markets_traded - 2) / 8.0)
+    weights.append(1.0)
 
     # Concentration (already 0-1 from compute_bet_concentration)
     signals.append(concentration)
+    weights.append(1.0)
 
     if not signals:
         return 0.0
-    return sum(signals) / len(signals)
+
+    return sum(s * w for s, w in zip(signals, weights)) / sum(weights)
+
+
+def compute_position_size_signal(
+    total_usdc_invested: float,
+    avg_entry_price: float,
+) -> float:
+    """
+    NEW: Large USD investment at very low prices is a strong insider signal.
+
+    This captures the classic pattern: brand-new account dumps $5K-$50K
+    on a 15¢-25¢ outcome that most people think won't happen.
+
+    Combines two sub-signals:
+      - Size component: how much USDC (log-scaled)
+        $500 → 0.15, $1K → 0.30, $5K → 0.65, $10K → 0.80, $50K → 1.0
+      - Low-odds component: how cheap the entry price was
+        5¢ → 1.0, 15¢ → 0.57, 25¢ → 0.29, 35¢ → 0.0
+
+    Both must be present: $50K on a 60¢ outcome = 0 (just a big bet).
+    $100 on a 5¢ outcome = low (too small to matter).
+    $10K on a 15¢ outcome = HIGH (classic insider).
+    """
+    if total_usdc_invested < POSITION_SIZE_SUSPICIOUS_THRESHOLD:
+        return 0.0
+
+    # Size component: log-scaled with clean monotonic increase
+    # $500 → ~0.15, $1K → ~0.25, $5K → ~0.55, $10K → ~0.70, $50K → ~0.90, $100K → 1.0
+    ratio = total_usdc_invested / POSITION_SIZE_SUSPICIOUS_THRESHOLD  # 1.0 at threshold
+    # log2 scaling: ratio=1 → 0.0, ratio=10 → 0.48, ratio=100 → 0.96, ratio=200 → 1.0
+    size_score = min(1.0, math.log2(ratio + 1) / math.log2(201))
+
+    # Low-odds component: buying below the threshold price
+    if avg_entry_price >= LOW_ODDS_PRICE_THRESHOLD:
+        return 0.0  # Not a low-odds bet — doesn't trigger this signal
+
+    price_score = min(
+        1.0,
+        (LOW_ODDS_PRICE_THRESHOLD - avg_entry_price) / LOW_ODDS_PRICE_THRESHOLD,
+    )
+
+    # Combined: both size AND low odds required
+    return size_score * 0.6 + price_score * 0.4
 
 
 # ---------------------------------------------------------------------------
@@ -174,6 +248,7 @@ class ScoringResult:
     timing_signal: float = 0.0
     entry_price_edge: float = 0.0
     account_pattern: float = 0.0
+    position_size_signal: float = 0.0
 
     score: float = 0.0
     passes_gate: bool = False
@@ -186,6 +261,7 @@ class ScoringResult:
             "timing_signal": round(self.timing_signal, 4),
             "entry_price_edge": round(self.entry_price_edge, 4),
             "account_pattern": round(self.account_pattern, 4),
+            "position_size_signal": round(self.position_size_signal, 4),
             "score": round(self.score, 2),
             "passes_gate": self.passes_gate,
             "elevated_factors": self.elevated_factors,
@@ -198,6 +274,7 @@ def compute_suspicion_score(
     timing_signal: float,
     entry_price_edge: float,
     account_pattern: float,
+    position_size_signal: float = 0.0,
     weights: dict[str, float] | None = None,
 ) -> ScoringResult:
     """
@@ -208,11 +285,12 @@ def compute_suspicion_score(
     w = weights or SCORING_WEIGHTS
 
     raw = (
-        w["win_rate_anomaly"] * win_rate_anomaly
-        + w["bet_concentration"] * bet_concentration
-        + w["timing_signal"] * timing_signal
-        + w["entry_price_edge"] * entry_price_edge
-        + w["account_pattern"] * account_pattern
+        w.get("win_rate_anomaly", 0.15) * win_rate_anomaly
+        + w.get("bet_concentration", 0.15) * bet_concentration
+        + w.get("timing_signal", 0.10) * timing_signal
+        + w.get("entry_price_edge", 0.15) * entry_price_edge
+        + w.get("account_pattern", 0.20) * account_pattern
+        + w.get("position_size_signal", 0.25) * position_size_signal
     )
     score = min(100.0, max(0.0, raw * 100.0))
 
@@ -222,6 +300,7 @@ def compute_suspicion_score(
         "timing_signal": timing_signal,
         "entry_price_edge": entry_price_edge,
         "account_pattern": account_pattern,
+        "position_size_signal": position_size_signal,
     }
     elevated = [
         name for name, val in factors.items() if val >= ALERT_FACTOR_THRESHOLD
@@ -234,6 +313,7 @@ def compute_suspicion_score(
         timing_signal=timing_signal,
         entry_price_edge=entry_price_edge,
         account_pattern=account_pattern,
+        position_size_signal=position_size_signal,
         score=score,
         passes_gate=passes,
         elevated_factors=elevated,
@@ -241,7 +321,7 @@ def compute_suspicion_score(
 
 
 # ---------------------------------------------------------------------------
-# Legacy compatibility aliases (for any code that still imports old names)
+# Legacy compatibility aliases
 # ---------------------------------------------------------------------------
 
 def compute_market_timing(hours_to_resolution: float) -> float:

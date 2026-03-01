@@ -40,6 +40,7 @@ def _parse_factors(factors_json: str) -> FactorBreakdown:
             timing_signal=data.get("timing_signal", 0),
             entry_price_edge=data.get("entry_price_edge", 0),
             account_pattern=data.get("account_pattern", 0),
+            position_size_signal=data.get("position_size_signal", 0),
             elevated_factors=data.get("elevated_factors", []),
         )
     except (json.JSONDecodeError, TypeError):
@@ -349,7 +350,7 @@ async def get_stats():
 @router.get("/insiders", response_model=list[WalletProfile])
 async def get_insiders(
     limit: int = Query(default=50, ge=1, le=100),
-    min_score: float = Query(default=30, ge=0, le=100),
+    min_score: float = Query(default=15, ge=0, le=100),
 ):
     """
     Get top insider accounts ranked by risk score.
@@ -549,3 +550,19 @@ async def stop_scan_loop():
     """Manually stop the background scan loop."""
     await scan_loop.stop()
     return {"message": "Scan loop stopped"}
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# GET /api/backtest/{address}
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@router.get("/backtest/{address}")
+async def backtest_wallet(address: str):
+    """
+    Run the full detection pipeline on any wallet without saving results.
+    
+    Use to validate detection against known insiders:
+    GET /api/backtest/0xdde15ebd95330ce69136dc0ccd810d22382e02c5
+    """
+    from app.services.backtest import run_backtest
+    return await run_backtest(address)
