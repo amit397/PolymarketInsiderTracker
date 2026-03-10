@@ -74,12 +74,20 @@ CREATE INDEX IF NOT EXISTS idx_trades_timestamp    ON trades(timestamp);
 CREATE INDEX IF NOT EXISTS idx_alerts_score        ON alerts(suspicion_score DESC);
 CREATE INDEX IF NOT EXISTS idx_alerts_wallet       ON alerts(wallet_address);
 CREATE INDEX IF NOT EXISTS idx_alerts_created      ON alerts(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_alerts_condition_score ON alerts(condition_id, suspicion_score DESC);
 CREATE INDEX IF NOT EXISTS idx_markets_end_date    ON markets(end_date);
+CREATE INDEX IF NOT EXISTS idx_trades_wallet_time  ON trades(proxy_wallet, timestamp DESC);
+
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    name         TEXT NOT NULL UNIQUE,
+    applied_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
 """
 
 # Migration: add usdc_size column if missing (for existing databases)
 _MIGRATIONS = [
-    "ALTER TABLE trades ADD COLUMN usdc_size REAL DEFAULT 0",
+    ("2026_01_add_usdc_size_to_trades", "ALTER TABLE trades ADD COLUMN usdc_size REAL DEFAULT 0"),
 ]
 
 
@@ -99,12 +107,32 @@ async def init_db() -> None:
         await db.executescript(_SCHEMA)
         await db.commit()
 
-        # Run migrations (ignore errors for already-applied migrations)
-        for migration in _MIGRATIONS:
+        # Run migrations once via migration table
+        for migration_name, migration_sql in _MIGRATIONS:
+            cursor = await db.execute(
+                "SELECT 1 FROM schema_migrations WHERE name = ?",
+                (migration_name,),
+            )
+            already_applied = await cursor.fetchone()
+            if already_applied:
+                continue
+
             try:
-                await db.execute(migration)
+                await db.execute(migration_sql)
+                await db.execute(
+                    "INSERT INTO schema_migrations(name) VALUES (?)",
+                    (migration_name,),
+                )
                 await db.commit()
-            except Exception:
-                pass  # Column already exists
+            except aiosqlite.OperationalError as exc:
+                # Handle pre-existing, manually migrated databases.
+                if "duplicate column name" in str(exc).lower():
+                    await db.execute(
+                        "INSERT OR IGNORE INTO schema_migrations(name) VALUES (?)",
+                        (migration_name,),
+                    )
+                    await db.commit()
+                else:
+                    raise
     finally:
         await db.close()

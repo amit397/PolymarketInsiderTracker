@@ -17,8 +17,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 from collections import defaultdict
+from datetime import datetime, timezone
 from typing import Any
 
 from app.core.config import (
@@ -66,7 +66,7 @@ class Scanner:
     async def run_scan(
         self,
         lookback_hours: int = SCAN_LOOKBACK_HOURS,
-    ) -> list[dict[str, Any]]:
+    ) -> dict[str, int]:
         """
         Market-first scan:
         1. Fetch active markets of interest (geopolitical, political, etc.)
@@ -88,7 +88,7 @@ class Scanner:
 
         if not markets:
             logger.info("No interesting markets found")
-            return []
+            return {"trades_processed": 0, "wallet_candidates": 0}
 
         # 2. Filter to scannable markets (skip crypto/sports/entertainment)
         scannable = []
@@ -106,9 +106,10 @@ class Scanner:
 
         if not scannable:
             logger.info("No scannable markets after filtering")
-            return []
+            return {"trades_processed": 0, "wallet_candidates": 0}
 
         # 3. For each market, fetch trades and save them
+        cutoff_ts = int(datetime.now(timezone.utc).timestamp() - (lookback_hours * 3600))
         seen_hashes = await self._get_seen_tx_hashes()
         total_saved = 0
         wallet_candidates: set[str] = set()
@@ -150,9 +151,14 @@ class Scanner:
                 try:
                     t["size"] = float(t.get("size", 0))
                     t["price"] = float(t.get("price", 0))
+                    trade_ts = int(t.get("timestamp", 0))
                 except (ValueError, TypeError):
                     t["size"] = 0.0
                     t["price"] = 0.0
+                    trade_ts = 0
+
+                if trade_ts and trade_ts < cutoff_ts:
+                    continue
 
                 # Calculate USDC value (size * price)
                 usdc_val = t["size"] * t["price"]
@@ -194,7 +200,10 @@ class Scanner:
             "Market-first scan complete: %d trades saved, %d wallet candidates",
             total_saved, len(wallet_candidates),
         )
-        return []
+        return {
+            "trades_processed": total_saved,
+            "wallet_candidates": len(wallet_candidates),
+        }
 
     # ------------------------------------------------------------------
     # Historical Scan (Whale Watching) — kept for backward compat

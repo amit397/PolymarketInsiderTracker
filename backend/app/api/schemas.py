@@ -109,3 +109,14 @@ class ScanResponse(BaseModel):
     alerts_generated: int = 0
     trades_processed: int = 0
     message: str = "Scan complete"
+
+
+class PaginationMeta(BaseModel):
+    limit: int
+    offset: int
+    total: int
+
+
+class WalletTradesPage(BaseModel):
+    items: list[dict] = Field(default_factory=list)
+    pagination: PaginationMeta

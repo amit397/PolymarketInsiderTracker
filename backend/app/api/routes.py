@@ -16,6 +16,8 @@ from app.api.schemas import (
     ScanResponse,
     SuspiciousMarket,
     WalletProfile,
+    WalletTradesPage,
+    PaginationMeta,
 )
 from app.core.database import get_db
 from app.services.gamma_client import GammaClient
@@ -102,6 +104,7 @@ async def get_alerts(
 @router.get("/wallet/{address}", response_model=WalletProfile)
 async def get_wallet(address: str):
     """Full wallet profile with alerts and score breakdown."""
+    address = address.lower()
     db = await get_db()
     try:
         # Wallet info
@@ -152,21 +155,31 @@ async def get_wallet(address: str):
 # GET /api/wallet/{address}/trades
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-@router.get("/wallet/{address}/trades")
+@router.get("/wallet/{address}/trades", response_model=WalletTradesPage)
 async def get_wallet_trades(
     address: str,
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ):
     """Paginated trade history for a wallet."""
+    address = address.lower()
     db = await get_db()
     try:
+        count_cursor = await db.execute(
+            "SELECT COUNT(*) AS total FROM trades WHERE proxy_wallet = ?",
+            (address,),
+        )
+        total = (await count_cursor.fetchone())["total"]
+
         cursor = await db.execute(
             "SELECT * FROM trades WHERE proxy_wallet = ? ORDER BY timestamp DESC LIMIT ? OFFSET ?",
             (address, limit, offset),
         )
         rows = await cursor.fetchall()
-        return [dict(row) for row in rows]
+        return WalletTradesPage(
+            items=[dict(row) for row in rows],
+            pagination=PaginationMeta(limit=limit, offset=offset, total=total),
+        )
     finally:
         await db.close()
 
