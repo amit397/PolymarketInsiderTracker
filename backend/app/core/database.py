@@ -10,6 +10,11 @@ from app.core.config import DB_PATH
 # Schema DDL
 # ---------------------------------------------------------------------------
 _SCHEMA = """
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    id               TEXT PRIMARY KEY,
+    applied_at       TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS markets (
     id               TEXT PRIMARY KEY,
     question         TEXT NOT NULL,
@@ -69,10 +74,12 @@ CREATE TABLE IF NOT EXISTS alerts (
 );
 
 CREATE INDEX IF NOT EXISTS idx_trades_proxy_wallet ON trades(proxy_wallet);
+CREATE INDEX IF NOT EXISTS idx_trades_wallet_timestamp ON trades(proxy_wallet, timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_trades_condition_id ON trades(condition_id);
 CREATE INDEX IF NOT EXISTS idx_trades_timestamp    ON trades(timestamp);
 CREATE INDEX IF NOT EXISTS idx_alerts_score        ON alerts(suspicion_score DESC);
 CREATE INDEX IF NOT EXISTS idx_alerts_wallet       ON alerts(wallet_address);
+CREATE INDEX IF NOT EXISTS idx_alerts_market_score ON alerts(condition_id, suspicion_score DESC);
 CREATE INDEX IF NOT EXISTS idx_alerts_created      ON alerts(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_alerts_condition_score ON alerts(condition_id, suspicion_score DESC);
 CREATE INDEX IF NOT EXISTS idx_markets_end_date    ON markets(end_date);
@@ -91,6 +98,7 @@ _MIGRATIONS = [
     ("2026_02_normalize_trades_wallet_case", "UPDATE trades SET proxy_wallet = LOWER(proxy_wallet) WHERE proxy_wallet IS NOT NULL"),
     ("2026_03_normalize_wallets_address_case", "UPDATE wallets SET address = LOWER(address) WHERE address IS NOT NULL"),
     ("2026_04_normalize_alerts_wallet_case", "UPDATE alerts SET wallet_address = LOWER(wallet_address) WHERE wallet_address IS NOT NULL"),
+
 ]
 
 
@@ -137,5 +145,6 @@ async def init_db() -> None:
                     await db.commit()
                 else:
                     raise
+
     finally:
         await db.close()

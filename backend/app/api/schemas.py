@@ -57,6 +57,29 @@ class WalletProfile(BaseModel):
     alerts: list[AlertResponse] = Field(default_factory=list)
 
 
+class TradeRecord(BaseModel):
+    id: int
+    condition_id: str
+    market_slug: str | None = None
+    proxy_wallet: str
+    side: str
+    size: float
+    usdc_size: float = 0.0
+    price: float
+    outcome: str | None = None
+    timestamp: int
+    tx_hash: str | None = None
+    market_question: str | None = None
+
+
+class WalletTradesPage(BaseModel):
+    items: list[TradeRecord] = Field(default_factory=list)
+    limit: int
+    offset: int
+    total: int
+    has_more: bool
+
+
 # ---------------------------------------------------------------------------
 # Market
 # ---------------------------------------------------------------------------

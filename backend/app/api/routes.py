@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Query, BackgroundTasks
@@ -15,6 +16,8 @@ from app.api.schemas import (
     ScanRequest,
     ScanResponse,
     SuspiciousMarket,
+    TradeRecord,
+    WalletTradesPage,
     WalletProfile,
     WalletTradesPage,
     PaginationMeta,
@@ -26,6 +29,15 @@ from app.core.monitor import monitor # Import Monitor
 from app.services.scan_loop import scan_loop # Import ScanLoop
 
 router = APIRouter(prefix="/api")
+WALLET_ADDRESS_RE = re.compile(r"^0x[a-fA-F0-9]{40}$")
+
+
+def _validate_wallet_address(address: str) -> str:
+    if not WALLET_ADDRESS_RE.match(address):
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=422, detail="Invalid wallet address format")
+    return address.lower()
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -104,18 +116,22 @@ async def get_alerts(
 @router.get("/wallet/{address}", response_model=WalletProfile)
 async def get_wallet(address: str):
     """Full wallet profile with alerts and score breakdown."""
-    address = address.lower()
+    address = _validate_wallet_address(address)
+
     db = await get_db()
     try:
         # Wallet info
         cursor = await db.execute(
+
             "SELECT * FROM wallets WHERE LOWER(address) = ?", (address,)
+
         )
         wallet_row = await cursor.fetchone()
 
         # Alerts for this wallet
         cursor = await db.execute(
             "SELECT * FROM alerts WHERE LOWER(wallet_address) = ? ORDER BY suspicion_score DESC",
+
             (address,),
         )
         alert_rows = await cursor.fetchall()
@@ -155,7 +171,9 @@ async def get_wallet(address: str):
 # GET /api/wallet/{address}/trades
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+
 @router.get("/wallet/{address}/trades", response_model=WalletTradesPage | list[dict])
+
 async def get_wallet_trades(
     address: str,
     limit: int = Query(default=50, ge=1, le=200),
@@ -163,16 +181,19 @@ async def get_wallet_trades(
     include_pagination: bool = Query(default=False),
 ):
     """Paginated trade history for a wallet."""
+
     address = address.lower()
     db = await get_db()
     try:
         count_cursor = await db.execute(
             "SELECT COUNT(*) AS total FROM trades WHERE LOWER(proxy_wallet) = ?",
+
             (address,),
         )
         total = (await count_cursor.fetchone())["total"]
 
         cursor = await db.execute(
+
             "SELECT * FROM trades WHERE LOWER(proxy_wallet) = ? ORDER BY timestamp DESC LIMIT ? OFFSET ?",
             (address, limit, offset),
         )
@@ -182,6 +203,7 @@ async def get_wallet_trades(
         return WalletTradesPage(
             items=[dict(row) for row in rows],
             pagination=PaginationMeta(limit=limit, offset=offset, total=total),
+
         )
     finally:
         await db.close()
