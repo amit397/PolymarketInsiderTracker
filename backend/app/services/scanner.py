@@ -166,6 +166,7 @@ class Scanner:
                 # Track per-wallet USDC volume
                 wallet = t.get("proxyWallet", "")
                 if wallet:
+                    wallet = wallet.lower()
                     wallet_volumes[wallet] += usdc_val
 
                 # Dedup
@@ -292,7 +293,7 @@ class Scanner:
                     (
                         t.get("conditionId", ""),
                         t.get("_slug", t.get("slug", "")),
-                        t.get("proxyWallet", ""),
+                        (t.get("proxyWallet", "") or "").lower(),
                         t.get("side", ""),
                         t.get("size", 0),
                         t.get("_usdc_size", t.get("size", 0) * t.get("price", 0)),

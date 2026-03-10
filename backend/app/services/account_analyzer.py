@@ -83,12 +83,12 @@ class AccountAnalyzer:
                 HAVING market_usdc >= ?
             """, (MIN_POSITION_SIZE,))
             rows = await cursor.fetchall()
-            whale_wallets = {row[0] for row in rows}
+            whale_wallets = {str(row[0]).lower() for row in rows}
 
             # Get already scanned
             cursor = await db.execute("SELECT address FROM wallets")
             rows = await cursor.fetchall()
-            scanned = {row[0] for row in rows}
+            scanned = {str(row[0]).lower() for row in rows}
 
             # New wallets
             new_wallets = list(whale_wallets - scanned)
@@ -100,7 +100,7 @@ class AccountAnalyzer:
                 AND last_scanned < datetime('now', '-1 day')
             """)
             rows = await cursor.fetchall()
-            stale_whales = [row[0] for row in rows]
+            stale_whales = [str(row[0]).lower() for row in rows]
 
             wallets = list(set(new_wallets + stale_whales))
 
@@ -140,6 +140,7 @@ class AccountAnalyzer:
 
     async def analyze_wallet(self, wallet: str) -> None:
         """Perform deep analysis on a single wallet using the six-factor scoring system."""
+        wallet = wallet.lower()
 
         # ---- 1. Enrich: fetch wallet's full trade history via server-side filter ----
         await self._enrich_wallet_history(wallet)
@@ -459,6 +460,7 @@ class AccountAnalyzer:
         
         No longer has a 10-trade cap — always enriches to get complete history.
         """
+        wallet = wallet.lower()
         logger.info("Enriching trade history for %s", wallet)
 
         try:
@@ -494,7 +496,7 @@ class AccountAnalyzer:
                     new_trades.append((
                         t.get("conditionId", ""),
                         t.get("slug", ""),
-                        t.get("proxyWallet", wallet),
+                        (t.get("proxyWallet", wallet) or wallet).lower(),
                         t.get("side", ""),
                         size,
                         usdc_size,

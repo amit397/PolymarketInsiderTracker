@@ -88,6 +88,9 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 # Migration: add usdc_size column if missing (for existing databases)
 _MIGRATIONS = [
     ("2026_01_add_usdc_size_to_trades", "ALTER TABLE trades ADD COLUMN usdc_size REAL DEFAULT 0"),
+    ("2026_02_normalize_trades_wallet_case", "UPDATE trades SET proxy_wallet = LOWER(proxy_wallet) WHERE proxy_wallet IS NOT NULL"),
+    ("2026_03_normalize_wallets_address_case", "UPDATE wallets SET address = LOWER(address) WHERE address IS NOT NULL"),
+    ("2026_04_normalize_alerts_wallet_case", "UPDATE alerts SET wallet_address = LOWER(wallet_address) WHERE wallet_address IS NOT NULL"),
 ]
 
 

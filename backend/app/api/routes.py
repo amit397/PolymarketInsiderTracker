@@ -109,13 +109,13 @@ async def get_wallet(address: str):
     try:
         # Wallet info
         cursor = await db.execute(
-            "SELECT * FROM wallets WHERE address = ?", (address,)
+            "SELECT * FROM wallets WHERE LOWER(address) = ?", (address,)
         )
         wallet_row = await cursor.fetchone()
 
         # Alerts for this wallet
         cursor = await db.execute(
-            "SELECT * FROM alerts WHERE wallet_address = ? ORDER BY suspicion_score DESC",
+            "SELECT * FROM alerts WHERE LOWER(wallet_address) = ? ORDER BY suspicion_score DESC",
             (address,),
         )
         alert_rows = await cursor.fetchall()
@@ -155,27 +155,30 @@ async def get_wallet(address: str):
 # GET /api/wallet/{address}/trades
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-@router.get("/wallet/{address}/trades", response_model=WalletTradesPage)
+@router.get("/wallet/{address}/trades", response_model=WalletTradesPage | list[dict])
 async def get_wallet_trades(
     address: str,
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
+    include_pagination: bool = Query(default=False),
 ):
     """Paginated trade history for a wallet."""
     address = address.lower()
     db = await get_db()
     try:
         count_cursor = await db.execute(
-            "SELECT COUNT(*) AS total FROM trades WHERE proxy_wallet = ?",
+            "SELECT COUNT(*) AS total FROM trades WHERE LOWER(proxy_wallet) = ?",
             (address,),
         )
         total = (await count_cursor.fetchone())["total"]
 
         cursor = await db.execute(
-            "SELECT * FROM trades WHERE proxy_wallet = ? ORDER BY timestamp DESC LIMIT ? OFFSET ?",
+            "SELECT * FROM trades WHERE LOWER(proxy_wallet) = ? ORDER BY timestamp DESC LIMIT ? OFFSET ?",
             (address, limit, offset),
         )
         rows = await cursor.fetchall()
+        if not include_pagination:
+            return [dict(row) for row in rows]
         return WalletTradesPage(
             items=[dict(row) for row in rows],
             pagination=PaginationMeta(limit=limit, offset=offset, total=total),
