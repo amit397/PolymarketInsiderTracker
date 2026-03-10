@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
-import { fetchAlerts, fetchStats, triggerScan, fetchExpiringMarkets, fetchInsiders } from "@/lib/api";
+import { fetchAlerts, fetchStats, triggerScan, fetchInsiders } from "@/lib/api";
 import AnalysisStatus from "@/components/AnalysisStatus";
 import {
   shortAddr,
@@ -23,7 +23,6 @@ export default function DashboardPage() {
   const [stats, setStats] = useState(null);
   const [insiders, setInsiders] = useState([]);
   const [alerts, setAlerts] = useState([]);
-  const [expiring, setExpiring] = useState([]);
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
   const [horizon, setHorizon] = useState(168);
@@ -47,15 +46,6 @@ export default function DashboardPage() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
-
-  useEffect(() => {
-    if (tab !== "expiring") return;
-    let active = true;
-    fetchExpiringMarkets({ hours: horizon })
-      .then((data) => active && setExpiring(data))
-      .catch(() => { });
-    return () => { active = false; };
-  }, [tab, horizon]);
 
   const handleScan = async () => {
     setScanning(true);
@@ -126,14 +116,6 @@ export default function DashboardPage() {
             loading={loading}
             expanded={expandedAlert}
             onToggle={(id) => setExpandedAlert(expandedAlert === id ? null : id)}
-          />
-        )}
-
-        {tab === "expiring" && (
-          <ExpiringSection
-            markets={expiring}
-            horizon={horizon}
-            onHorizonChange={setHorizon}
           />
         )}
       </div>
@@ -222,7 +204,7 @@ function InsidersTable({ insiders, loading }) {
           {insiders.map((wallet, i) => {
             const score = wallet.risk_score || 0;
             const winRate = wallet.win_rate || 0;
-            const pnl = wallet.analysis?.total_profit || 0; // Assuming total_profit field
+            const pnl = wallet.total_profit || 0; // Fixed total_profit
 
             // Determine Score Color
             const scoreColor = score > 75 ? "var(--signal-danger)" : score > 50 ? "var(--signal-warning)" : "var(--text-muted)";
@@ -357,64 +339,6 @@ function AlertsFeed({ alerts, loading, expanded, onToggle }) {
           </div>
         );
       })}
-    </div>
-  );
-}
-
-function ExpiringSection({ markets, horizon, onHorizonChange }) {
-  const options = [24, 48, 72, 168];
-
-  return (
-    <div>
-      <div style={{ marginBottom: "var(--space-4)", display: "flex", gap: "var(--space-2)" }}>
-        {options.map((h) => (
-          <button
-            key={h}
-            className="btn btn-outline"
-            style={{
-              borderColor: horizon === h ? "var(--brand-primary)" : "var(--border-dim)",
-              color: horizon === h ? "var(--text-main)" : "var(--text-muted)",
-              fontSize: "0.75rem", padding: "4px 8px"
-            }}
-            onClick={() => onHorizonChange(h)}
-          >
-            {h}H
-          </button>
-        ))}
-      </div>
-
-      {!markets.length ? (
-        <div style={{ padding: "var(--space-6)", color: "var(--text-muted)", textAlign: "center", fontStyle: "italic" }}>No markets expiring in this window.</div>
-      ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "var(--space-4)" }}>
-          {markets.map((m, i) => (
-            <div key={i} className="panel" style={{ padding: "var(--space-4)", backgroundColor: "var(--bg-app)" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "var(--space-2)" }}>
-                {m.hours_remaining > 0 ? (
-                  <span className="badge amber" style={{ fontSize: "0.65rem" }}>{formatCountdown(m.hours_remaining)} LEFT</span>
-                ) : <span />}
-                <span className="mono" style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>${formatNum(m.volume)} VOL</span>
-              </div>
-              <a
-                href={`https://polymarket.com/event/${m.event_slug || m.slug}`}
-                target="_blank"
-                rel="noreferrer"
-                className="hover-underline"
-                style={{ display: "block", color: "inherit", fontWeight: 500, fontSize: "0.85rem", marginBottom: "var(--space-4)", height: "2.8em", overflow: "hidden", lineHeight: 1.4 }}
-              >
-                {m.question}
-              </a>
-
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: "0.75rem" }}>
-                <span style={{ color: "var(--text-muted)" }}>SUSPICIOUS TRADES</span>
-                <span className="mono" style={{ color: m.suspicious_trade_count > 0 ? "var(--signal-danger)" : "var(--text-main)", fontWeight: 700 }}>
-                  {m.suspicious_trade_count}
-                </span>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   );
 }

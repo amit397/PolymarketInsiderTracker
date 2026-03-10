@@ -81,7 +81,7 @@ class PnLCalculator:
         total_losses = 0
         total_resolved = 0
         total_pnl = 0.0
-        avg_entry_prices: dict[str, float] = {}  # conditionId -> avg entry price
+        avg_entry_prices: dict[str, dict[str, float]] = defaultdict(dict)  # conditionId -> outcome -> avg entry price
 
         for cid, position_data in market_positions.items():
             market = resolved_markets.get(cid)
@@ -89,6 +89,18 @@ class PnLCalculator:
                 continue
 
             winner_outcome = market.get("winner_outcome")
+            if not winner_outcome:
+                outcomes = market.get("outcomes", [])
+                outcome_prices = market.get("outcomePrices", [])
+                if outcomes and outcome_prices and len(outcomes) == len(outcome_prices):
+                    try:
+                        prices = [float(p) for p in outcome_prices]
+                        max_idx = prices.index(max(prices))
+                        if prices[max_idx] > 0.5:  # Winner's final price is typically 1.0 (or very close to it)
+                            winner_outcome = outcomes[max_idx]
+                    except (ValueError, TypeError):
+                        pass
+
             if not winner_outcome:
                 continue
 
@@ -124,10 +136,10 @@ class PnLCalculator:
                     if net_direction != "correct":
                         net_direction = "incorrect"
 
-                # Track avg entry price for this market
+                # Track avg entry price for this market + outcome
                 if pos["total_buy_size"] > 0:
                     avg_entry = pos["weighted_entry_sum"] / pos["total_buy_size"]
-                    avg_entry_prices[cid] = avg_entry
+                    avg_entry_prices[cid][outcome_name] = avg_entry
 
             total_pnl += position_pnl
 
@@ -146,7 +158,7 @@ class PnLCalculator:
             "losses": total_losses,
             "total_pnl": round(total_pnl, 2),
             "total_profit": round(total_profit, 2),
-            "avg_entry_prices": avg_entry_prices,
+            "avg_entry_prices": dict(avg_entry_prices),
         }
 
     def _empty_stats(self) -> dict[str, Any]:

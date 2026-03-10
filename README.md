@@ -2,7 +2,7 @@
 
 A web application that detects potentially suspicious trading activity on [Polymarket](https://polymarket.com) by analyzing publicly available trade data. The system computes a multi-factor **suspicion score** for each wallet and presents results through an interactive dashboard.
 
-> **Disclaimer:** This tool is for informational and research purposes only. It does not accuse anyone of illegal activity. All data is sourced from public blockchains and APIs.
+> **Disclaimer:** This tool is for informational and research purposes only. It does not accuse anyone of insider activity. All data is sourced from public blockchains and APIs.
 
 ---
 
@@ -17,7 +17,6 @@ The tracker identifies wallets exhibiting patterns commonly associated with info
 - **Bets concentrated in a single topic** rather than diversified
 - **Trades timed suspiciously close** to market resolution
 - **Rapid price movement** in the trader's favor shortly after entry
-- **Short-dated contract focus** — proactive scanning of markets resolving within 1–7 days, the highest-risk window for insider activity
 
 Each wallet receives a **Suspicion Score (0–100)** computed from 5 weighted factors:
 
@@ -102,7 +101,6 @@ polymarket-insider-tracker/
 | `/api/wallet/{address}` | GET | Wallet profile with score breakdown |
 | `/api/wallet/{address}/trades` | GET | Paginated trade history |
 | `/api/markets/suspicious` | GET | Markets ranked by avg suspicion score |
-| `/api/markets/expiring` | GET | Markets resolving soon with suspicious trade counts (filterable by `hours`, `min_score`, `min_volume`) |
 | `/api/stats` | GET | Global dashboard statistics |
 | `/api/scan` | POST | Trigger a manual scan |
 
@@ -148,15 +146,14 @@ python -m pytest tests/test_calibration.py -v --timeout=120
 - Color-coded score badges (green → red)
 - Reason tags: "Fresh Wallet", "Large Trade", "Timed Entry"
 - Category and score filters
-- Tab toggle between **All Alerts** and **Expiring Soon**
 
-### Expiring Markets (Short-Dated Contracts)
-- Dedicated view for markets resolving within 1–7 days
-- Time horizon selector: 24h / 48h / 72h / 7 days
-- Market cards with **live countdown timers** to resolution
-- Suspicious trade count and top suspicion score per market
-- Click to expand and see flagged wallets for each market
-- Sorted by urgency (soonest-resolving first)
+### Whale Tracker
+- Tabular dashboard tracking "Smart Money"
+- Accounts trading over $100k+ with low risk scores
+- Links directly to Polymarket user profiles
+
+### About / Methodology
+- Explains the six-factor scoring system used to generate risk scores
 
 ### Wallet Profile
 - Overall score gauge with factor-by-factor breakdown
@@ -170,6 +167,6 @@ python -m pytest tests/test_calibration.py -v --timeout=120
 
 - [x] Detection logic design & scoring formula
 - [ ] **Phase 1:** Data layer + scoring engine + calibration tests
-- [ ] **Phase 2:** FastAPI backend + API endpoints (including `/api/markets/expiring`)
-- [ ] **Phase 3:** Next.js dashboard + wallet profiles + short-dated contracts view
+- [ ] **Phase 2:** FastAPI backend + API endpoints
+- [ ] **Phase 3:** Next.js dashboard + wallet profiles + about methodology view
 - [ ] **Future:** On-chain funding analysis, ML anomaly detection, WebSocket real-time alerts

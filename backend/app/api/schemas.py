@@ -49,6 +49,7 @@ class WalletProfile(BaseModel):
     first_seen: int | None = None
     total_trades: int = 0
     total_volume: float = 0.0
+    total_profit: float = 0.0
     risk_score: float = 0.0
     analysis: dict | None = None
     categories: dict[str, float] = Field(default_factory=dict)

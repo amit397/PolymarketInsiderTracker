@@ -57,21 +57,23 @@ export default function WhalesPage() {
                         <span>Wallet</span>
                         <span style={{ textAlign: "right" }}>Win Rate</span>
                         <span style={{ textAlign: "right" }}>Profit</span>
-                        <span style={{ textAlign: "right" }}>Volume</span>
+                        <span style={{ textAlign: "right" }}>Positions Value</span>
                         <span style={{ textAlign: "right" }}>Trades</span>
                         <span style={{ textAlign: "right" }}>Risk</span>
                     </div>
 
                     {whales.map((w) => {
                         const winRate = w.win_rate || w.analysis?.win_rate || 0;
-                        const profit = w.analysis?.total_profit ?? 0;
+                        const profit = w.total_profit ?? 0;
                         const profitColor = profit > 0 ? "var(--signal-success)" : profit < 0 ? "var(--signal-danger)" : "var(--text-muted)";
                         const winColor = winRate >= 0.7 ? "var(--signal-success)" : winRate >= 0.5 ? "var(--text-main)" : "var(--signal-danger)";
 
                         return (
-                            <Link
+                            <a
                                 key={w.address}
-                                href={`/wallet/${w.address}`}
+                                href={`https://polymarket.com/profile/${w.address}`}
+                                target="_blank"
+                                rel="noreferrer"
                                 style={{ textDecoration: "none" }}
                             >
                                 <div className="panel" style={{
@@ -117,7 +119,7 @@ export default function WhalesPage() {
                                         {w.risk_score?.toFixed(0) ?? "—"}
                                     </span>
                                 </div>
-                            </Link>
+                            </a>
                         );
                     })}
                 </div>

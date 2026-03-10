@@ -13,6 +13,20 @@ export async function fetchAlerts({ minScore = 0, category, limit = 50 } = {}) {
 }
 
 /**
+ * Fetch recent alerts.
+ * @param {{ minScore?: number, category?: string, limit?: number }} opts
+ */
+export async function fetchInsiders(limit = 100, minScore = 50, category = "") {
+  let url = `${API_BASE}/api/insiders?limit=${limit}&min_score=${minScore}`;
+  if (category && category !== "all") {
+    url += `&category=${category}`;
+  }
+  const res = await fetch(url, { revalidate: 30 }); // 30s ISR
+  if (!res.ok) throw new Error("Failed to fetch insiders");
+  return res.json();
+}
+
+/**
  * Fetch wallet profile.
  */
 export async function fetchWallet(address) {
@@ -32,34 +46,11 @@ export async function fetchWalletTrades(address, { limit = 50, offset = 0 } = {}
 }
 
 /**
- * Fetch expiring markets.
- */
-export async function fetchExpiringMarkets({ hours = 168, minScore = 50, minVolume = 100 } = {}) {
-  const params = new URLSearchParams({
-    hours: String(hours),
-    min_score: String(minScore),
-    min_volume: String(minVolume),
-  });
-  const res = await fetch(`${API_BASE}/api/markets/expiring?${params}`);
-  if (!res.ok) throw new Error(`Expiring: ${res.status}`);
-  return res.json();
-}
-
-/**
  * Fetch suspicious markets.
  */
 export async function fetchSuspiciousMarkets({ limit = 20 } = {}) {
   const res = await fetch(`${API_BASE}/api/markets/suspicious?limit=${limit}`);
   if (!res.ok) throw new Error(`Suspicious: ${res.status}`);
-  return res.json();
-}
-
-/**
- * Fetch dashboard stats.
- */
-export async function fetchInsiders(limit = 50) {
-  const res = await fetch(`${API_BASE}/insiders?limit=${limit}`);
-  if (!res.ok) throw new Error("Failed to fetch insiders");
   return res.json();
 }
 

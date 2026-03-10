@@ -94,7 +94,6 @@ Get a free key at [polygonscan.com/apis](https://polygonscan.com/apis).
 | GET | `/api/wallet/{address}` | Wallet profile |
 | GET | `/api/wallet/{address}/trades` | Wallet trade history |
 | GET | `/api/markets/suspicious` | Markets with most alerts |
-| GET | `/api/markets/expiring` | Markets expiring soon |
 
 ## Running Tests
 

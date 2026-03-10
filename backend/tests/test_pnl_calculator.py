@@ -123,7 +123,7 @@ def test_avg_entry_price(pnl):
     markets = {"1": {"closed": True, "winner_outcome": "Yes"}}
     stats = pnl.calculate_stats(trades, markets)
     # Weighted: (100*0.2 + 200*0.4) / 300 = (20+80)/300 = 100/300 ≈ 0.333
-    avg = stats["avg_entry_prices"].get("1")
+    avg = stats["avg_entry_prices"].get("1", {}).get("Yes")
     assert avg is not None
     assert avg == pytest.approx(0.333, abs=0.01)
 

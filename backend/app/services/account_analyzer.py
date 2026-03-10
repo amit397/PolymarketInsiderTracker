@@ -54,6 +54,7 @@ class AccountAnalyzer:
         self.polygonscan = polygonscan or PolygonscanClient()
         self.pnl_calculator = PnLCalculator()
         self._owns_clients = data is None
+        self._market_cache: dict[str, dict[str, Any]] = {}
 
     async def close(self) -> None:
         if self._owns_clients:
@@ -171,7 +172,7 @@ class AccountAnalyzer:
         # ---- 3. Compute USDC-based volumes per market ----
         market_usdc_volumes: dict[str, float] = defaultdict(float)
         market_share_volumes: dict[str, float] = defaultdict(float)
-        market_prices: dict[str, list[float]] = defaultdict(list)
+        market_prices: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
         for t in trades:
             cid = t.get("conditionId")
             if cid:
@@ -179,7 +180,8 @@ class AccountAnalyzer:
                 market_usdc_volumes[cid] += usdc
                 market_share_volumes[cid] += t["size"]
                 if t["price"] > 0 and t.get("side", "").upper() == "BUY":
-                    market_prices[cid].append(t["price"])
+                    outcome_str = t.get("outcome", "Unknown")
+                    market_prices[cid][outcome_str].append(t["price"])
 
         total_usdc = sum(market_usdc_volumes.values())
         max_single_market_usdc = max(market_usdc_volumes.values()) if market_usdc_volumes else 0.0
@@ -194,10 +196,20 @@ class AccountAnalyzer:
         for mid in market_ids:
             if not mid:
                 continue
+            
+            # Use cached market if available
+            if hasattr(self, "_market_cache") and mid in self._market_cache:
+                resolved_markets[mid] = self._market_cache[mid]
+                continue
+                
             try:
                 m = await self.gamma.fetch_market_by_id(mid)
                 if m:
+                    # Update cache
+                    if hasattr(self, "_market_cache"):
+                        self._market_cache[mid] = m
                     resolved_markets[mid] = m
+                await asyncio.sleep(0.15)  # Rate Limit Avoidance
             except Exception:
                 pass
 
@@ -257,29 +269,34 @@ class AccountAnalyzer:
 
         # Factor 4: Entry Price Edge
         edge_scores = []
-        for cid, avg_entry in avg_entry_prices.items():
+        for cid, market_avg_entries in avg_entry_prices.items():
             market = resolved_markets.get(cid)
             if market and market.get("closed") and market.get("winner_outcome"):
                 winner = market["winner_outcome"]
-                market_trades = [t for t in trades if t.get("conditionId") == cid]
-                winner_buys = sum(
-                    t["size"] for t in market_trades
-                    if t.get("side", "").upper() == "BUY" and t.get("outcome") == winner
-                )
-                winner_sells = sum(
-                    t["size"] for t in market_trades
-                    if t.get("side", "").upper() == "SELL" and t.get("outcome") == winner
-                )
-                won = (winner_buys - winner_sells) > 0
-                edge_scores.append(compute_entry_price_edge(avg_entry, won))
+                if winner in market_avg_entries:
+                    avg_entry = market_avg_entries[winner]
+                    market_trades = [t for t in trades if t.get("conditionId") == cid]
+                    winner_buys = sum(
+                        t["size"] for t in market_trades
+                        if t.get("side", "").upper() == "BUY" and t.get("outcome") == winner
+                    )
+                    winner_sells = sum(
+                        t["size"] for t in market_trades
+                        if t.get("side", "").upper() == "SELL" and t.get("outcome") == winner
+                    )
+                    won = (winner_buys - winner_sells) > 0
+                    edge_scores.append(compute_entry_price_edge(avg_entry, won))
         f_edge = (sum(edge_scores) / len(edge_scores)) if edge_scores else 0.0
 
         # Factor 5: Account Pattern (boosted freshness)
         f_pattern = compute_account_pattern(age_days, total_markets_traded, f_concentration)
 
         # Factor 6: Position Size Signal (NEW — large USDC on low-odds outcomes)
-        # Use the primary market's avg entry price
-        primary_prices = market_prices.get(primary_market_id, [])
+        # Flatten all prices for the primary market across outcomes (rough proxy, ideally mapped to specific targeted outcome)
+        primary_prices = []
+        if primary_market_id in market_prices:
+            for outcome_prices in market_prices[primary_market_id].values():
+                primary_prices.extend(outcome_prices)
         primary_avg_price = (
             sum(primary_prices) / len(primary_prices) if primary_prices else 0.5
         )

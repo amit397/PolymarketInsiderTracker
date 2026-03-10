@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, BackgroundTasks
 
 from app.api.schemas import (
     AlertResponse,
@@ -137,6 +137,7 @@ async def get_wallet(address: str):
             first_seen=wallet_row["first_seen"] if wallet_row else None,
             total_trades=wallet_row["total_trades"] if wallet_row else 0,
             total_volume=wallet_row["total_volume"] if wallet_row else 0.0,
+            total_profit=wallet_row["total_profit"] if wallet_row else 0.0,
             risk_score=wallet_row["risk_score"] if wallet_row else 0.0,
             analysis=analysis,
             categories=categories,
@@ -393,6 +394,7 @@ async def get_insiders(
                     first_seen=row["first_seen"],
                     total_trades=row["total_trades"],
                     total_volume=row["total_volume"],
+                    total_profit=row["total_profit"] if row["total_profit"] is not None else 0.0,
                     risk_score=row["risk_score"],
                     analysis=analysis,
                     categories=categories,
@@ -425,6 +427,7 @@ async def get_whales(
             SELECT * FROM wallets
             WHERE total_volume >= ?
               AND total_trades >= 3
+              AND risk_score < 40
               AND analysis_json IS NOT NULL
             ORDER BY total_profit DESC, total_volume DESC
             LIMIT ?
@@ -458,6 +461,7 @@ async def get_whales(
                     first_seen=row["first_seen"],
                     total_trades=row["total_trades"],
                     total_volume=row["total_volume"],
+                    total_profit=row["total_profit"] if row["total_profit"] is not None else 0.0,
                     risk_score=row["risk_score"],
                     analysis=analysis,
                     categories=categories,
@@ -474,25 +478,37 @@ async def get_whales(
 # POST /api/scan
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-@router.post("/scan", response_model=ScanResponse)
-async def trigger_scan(body: ScanRequest | None = None):
-    """Trigger a manual scan (ingest + analyze)."""
-    lookback = body.lookback_hours if body else 24
+async def _run_scan_task(lookback_hours: int):
+    # Background worker explicitly cleans up resources
     scanner = Scanner()
     from app.services.account_analyzer import AccountAnalyzer
     analyzer = AccountAnalyzer(data=scanner.data, gamma=scanner.gamma, polygonscan=scanner.polygonscan)
-    
     try:
-        # 1. Ingest
-        await scanner.run_scan(lookback_hours=lookback)
-        
-        # 2. Analyze
+        await scanner.run_scan(lookback_hours=lookback_hours)
         await analyzer.analyze_all_wallets()
-        
-        return ScanResponse(
-            alerts_generated=0, # Deprecated
-            message="Scan and analysis triggered successfully",
-        )
+    finally:
+        await scanner.close()
+        await analyzer.close()
+
+@router.post("/scan", response_model=ScanResponse)
+async def trigger_scan(background_tasks: BackgroundTasks, body: ScanRequest | None = None):
+    """Trigger a manual scan (ingest + analyze in background)."""
+    lookback = body.lookback_hours if body else 24
+    background_tasks.add_task(_run_scan_task, lookback)
+    
+    return ScanResponse(
+        alerts_generated=0,
+        message="Scan task queued and running in the background.",
+    )
+
+async def _run_historical_task(pages: int, min_size: float):
+    scanner = Scanner()
+    from app.services.account_analyzer import AccountAnalyzer
+    analyzer = AccountAnalyzer(data=scanner.data, gamma=scanner.gamma, polygonscan=scanner.polygonscan)
+    try:
+        count = await scanner.scan_history(lookback_pages=pages, min_size=min_size)
+        if count > 0:
+            await analyzer.analyze_all_wallets()
     finally:
         await scanner.close()
         await analyzer.close()
@@ -500,33 +516,19 @@ async def trigger_scan(body: ScanRequest | None = None):
 
 @router.post("/scan/history", response_model=ScanResponse)
 async def trigger_historical_scan(
+    background_tasks: BackgroundTasks,
     pages: int = Query(default=100, ge=1, le=5000),
     min_size: float = Query(default=10000.0, ge=1000.0),
 ):
     """
-    Trigger a deep historical scan to find whales.
-    Iterates backward through global trades filtering by min_size.
-    Then triggers analysis on found wallets.
+    Trigger a deep historical scan to find whales in the background.
     """
-    scanner = Scanner()
-    from app.services.account_analyzer import AccountAnalyzer
-    analyzer = AccountAnalyzer(data=scanner.data, gamma=scanner.gamma, polygonscan=scanner.polygonscan)
-    
-    try:
-        # 1. Deep Ingest
-        count = await scanner.scan_history(lookback_pages=pages, min_size=min_size)
+    background_tasks.add_task(_run_historical_task, pages, min_size)
         
-        # 2. Analyze
-        if count > 0:
-            await analyzer.analyze_all_wallets()
-        
-        return ScanResponse(
-            trades_processed=count,
-            message=f"Historical scan complete. {count} whale trades found. Analysis triggered.",
-        )
-    finally:
-        await scanner.close()
-        await analyzer.close()
+    return ScanResponse(
+        trades_processed=0,
+        message=f"Historical scan queued. Iterating through {pages} pages in the background.",
+    )
 
 
 @router.get("/monitor/status")

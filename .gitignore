@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env
+
+# SQLite
+*.db
+*.sqlite
+*.sqlite3
+*.db-shm
+*.db-wal
+
+# Build and IDE
+.DS_Store
+.vscode/
+.idea/
+
+# JavaScript/Node
+node_modules/
+.next/
+dist/
+build/
+.env.local
+.env.development.local
+
+# Project specific
+backend/trade.json
+backend/debug_output.txt
