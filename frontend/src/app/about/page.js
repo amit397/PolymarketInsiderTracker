@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FACTOR_LABELS } from "@/lib/utils";
+import { FACTOR_LABELS, FactorCard } from "@/lib/utils";
 
 /* ═══════════════════════════════════════════════════════════
    About / Methodology Page
@@ -41,27 +41,27 @@ export default function AboutPage() {
 
                 <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "var(--space-4)" }}>
                     <FactorCard
-                        title={FACTOR_LABELS.f_fresh}
+                        title={FACTOR_LABELS.account_pattern}
                         weight="20%"
                         desc="Wallets created very recently (e.g., within the last 7 days) and immediately depositing large sums of USDC to bet on a single outcome."
                     />
                     <FactorCard
-                        title={FACTOR_LABELS.f_concentration}
+                        title={FACTOR_LABELS.bet_concentration}
                         weight="20%"
                         desc="Wallets that do not diversify. If 90%+ of a wallet's capital is deployed into a single market or related group of markets, it indicates extreme confidence."
                     />
                     <FactorCard
-                        title={FACTOR_LABELS.f_position}
+                        title={FACTOR_LABELS.position_size_signal}
                         weight="20%"
                         desc="Position size relative to the market's total liquidity. If a wallet's single trade makes up a significant percentage of the entire market volume, it is flagged."
                     />
                     <FactorCard
-                        title={FACTOR_LABELS.f_timing}
+                        title={FACTOR_LABELS.timing_signal}
                         weight="20%"
                         desc="Trades placed suspiciously close (within 24-48 hours) to the market's resolution or a major news catalyst."
                     />
                     <FactorCard
-                        title={FACTOR_LABELS.f_edge}
+                        title={FACTOR_LABELS.entry_price_edge}
                         weight="20%"
                         desc="Comparing the wallet's average entry price against the current market price or resolution price. If the wallet consistently beats the market average on execution, they have an edge."
                     />
@@ -86,18 +86,4 @@ export default function AboutPage() {
     );
 }
 
-function FactorCard({ title, weight, desc }) {
-    return (
-        <div className="panel" style={{ padding: "var(--space-4)", display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <span className="mono" style={{ color: "var(--text-main)", fontWeight: 600, fontSize: "0.9rem" }}>{title}</span>
-                <span className="badge" style={{ fontSize: "0.7rem", color: "var(--brand-primary)", borderColor: "var(--brand-primary)" }}>
-                    {weight} WEIGHT
-                </span>
-            </div>
-            <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", lineHeight: 1.5 }}>
-                {desc}
-            </p>
-        </div>
-    );
-}
+

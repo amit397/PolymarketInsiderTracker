@@ -11,6 +11,7 @@ import {
   timeAgo,
   formatCountdown,
   FACTOR_LABELS,
+  FactorCard
 } from "@/lib/utils";
 
 /* ═══════════════════════════════════════════════════════════
@@ -71,10 +72,32 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "var(--space-4)", marginBottom: "var(--space-6)" }}>
+        <FactorCard
+          title="Current Development Sprint"
+          weight="March 2026"
+          desc={
+            <ul style={{
+              margin: "0.5rem 0 0 0",
+              paddingLeft: "1.2rem",
+              display: "flex",
+              flexDirection: "column",
+              gap: "0.4rem"
+            }}>
+              <li><strong>Risk Engine Sync:</strong> Aligning UI with the backend's 6-factor scoring system and rethinking heuristic calculations.</li>
+              <li><strong>Data Persistence:</strong> Adding JSON export and Supabase infrastructure. Currently wipes after every Render Deployment</li>
+              <li><strong>Financial Logic:</strong> Fixing Win Rate/PnL since it's displaying 0. </li>
+              <li><strong>Whales Dashboard:</strong> Implementing sortable headers and performance metrics and seperating it from insider tracking (future copytrading feature).</li>
+              <li><strong>Advanced Detection:</strong> Enhancing scanner logic with wallet-age filtering.</li>
+            </ul>
+          }
+        />
+      </div>
+
       <AnalysisStatus />
 
       <div className="stats-grid">
-        <StatCard label="Possible Insiders Tracked" value={stats ? formatNum(stats.total_wallets_scanned) : "—"} />
+        <StatCard label="Accounts Tracked" value={stats ? formatNum(stats.total_wallets_scanned) : "—"} />
         <StatCard label="Total Alerts" value={stats ? formatNum(stats.total_alerts) : "—"} />
         <StatCard label="Avg Risk Score" value={stats ? formatNum(stats.avg_score, 1) : "—"} />
         <StatCard label="Max Risk Score" value={stats ? formatNum(stats.max_score, 1) : "—"} highlight={stats?.max_score > 80} />

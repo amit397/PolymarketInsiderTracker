@@ -68,9 +68,27 @@ export function timeAgo(isoString) {
  * Human-readable factor names.
  */
 export const FACTOR_LABELS = {
-    volume_anomaly: "Volume Anomaly",
-    topic_concentration: "Topic Concentration",
-    market_timing: "Market Timing",
-    wallet_freshness: "Wallet Freshness",
-    rapid_profit: "Rapid Profit",
+    win_rate_anomaly: "Win Rate Anomaly",
+    bet_concentration: "Bet Concentration",
+    timing_signal: "Timing Signal",
+    entry_price_edge: "Entry Price Edge",
+    account_pattern: "Account Pattern",
+    position_size_signal: "Position Size Signal",
 };
+
+export function FactorCard({ title, weight, desc }) {
+    return (
+        <div className="panel" style={{ padding: "var(--space-4)", display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span className="mono" style={{ color: "var(--text-main)", fontWeight: 600, fontSize: "0.9rem" }}>{title}</span>
+                <span className="badge" style={{ fontSize: "0.7rem", color: "var(--brand-primary)", borderColor: "var(--brand-primary)" }}>
+                    {weight}{String(weight).includes('%') ? ' WEIGHT' : ''}
+                </span>
+            </div>
+            {/* FIX: Use <div> instead of <p> to avoid hydration errors with <ul> */}
+            <div style={{ color: "var(--text-muted)", fontSize: "0.85rem", lineHeight: 1.5 }}>
+                {desc}
+            </div>
+        </div>
+    );
+}
