@@ -320,6 +320,33 @@ def compute_suspicion_score(
     )
 
 
+def apply_conservative_wallet_age_filter(
+    result: ScoringResult,
+    age_days: float | None,
+) -> tuple[ScoringResult, bool]:
+    """Reduce or suppress insider confidence for well-established wallets.
+
+    The goal is conservative false-positive reduction:
+    - very old wallets should not be flagged unless the score is already compelling,
+    - moderately old wallets are slightly penalized,
+    - very fresh wallets are untouched because freshness is already modeled elsewhere.
+    """
+    if age_days is None or age_days < 90:
+        return result, False
+
+    if age_days >= 365 and result.score < 75:
+        result.score = round(result.score * 0.7, 2)
+        result.passes_gate = False
+        return result, True
+
+    if age_days >= 180 and result.score < 60:
+        result.score = round(result.score * 0.8, 2)
+        result.passes_gate = False
+        return result, True
+
+    return result, False
+
+
 # ---------------------------------------------------------------------------
 # Legacy compatibility aliases
 # ---------------------------------------------------------------------------
