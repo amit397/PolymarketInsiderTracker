@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any, Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -50,10 +52,17 @@ class WalletProfile(BaseModel):
     total_trades: int = 0
     total_volume: float = 0.0
     total_profit: float = 0.0
+    total_pnl: float = 0.0
     risk_score: float = 0.0
     analysis: dict | None = None
     categories: dict[str, float] = Field(default_factory=dict)
     win_rate: float = 0.0
+    resolved_markets_count: int = 0
+    account_age_days: float | None = None
+    score_label: str = "low"
+    why_flagged: list[str] = Field(default_factory=list)
+    top_factors: list[str] = Field(default_factory=list)
+    followability_score: float = 0.0
     alerts: list[AlertResponse] = Field(default_factory=list)
 
 
@@ -132,3 +141,13 @@ class ScanResponse(BaseModel):
     alerts_generated: int = 0
     trades_processed: int = 0
     message: str = "Scan complete"
+
+
+class ImportSnapshotRequest(BaseModel):
+    snapshot: dict[str, Any]
+    mode: Literal["merge", "replace"] = "merge"
+
+
+class ImportSnapshotResponse(BaseModel):
+    message: str = "Snapshot imported"
+    counts: dict[str, int] = Field(default_factory=dict)

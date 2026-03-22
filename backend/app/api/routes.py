@@ -13,6 +13,8 @@ from app.api.schemas import (
     DashboardStats,
     ExpiringMarketResponse,
     FactorBreakdown,
+    ImportSnapshotRequest,
+    ImportSnapshotResponse,
     ScanRequest,
     ScanResponse,
     SuspiciousMarket,
@@ -22,9 +24,16 @@ from app.api.schemas import (
 )
 from app.core.database import get_db
 from app.services.gamma_client import GammaClient
+from app.services.intelligence import (
+    followability_score,
+    score_label,
+    top_factor_names,
+    why_flagged,
+)
 from app.services.scanner import Scanner
 from app.core.monitor import monitor # Import Monitor
 from app.services.scan_loop import scan_loop # Import ScanLoop
+from app.services.snapshots import SQLiteSnapshotRepository
 
 router = APIRouter(prefix="/api")
 WALLET_ADDRESS_RE = re.compile(r"^0x[a-fA-F0-9]{40}$")
@@ -74,6 +83,53 @@ def _row_to_alert(row) -> AlertResponse:
         trade_side=row["trade_side"],
         tx_hash=row["tx_hash"],
         created_at=row["created_at"],
+    )
+
+
+def _parse_json_blob(payload: str | None) -> dict:
+    if not payload:
+        return {}
+    try:
+        parsed = json.loads(payload)
+        return parsed if isinstance(parsed, dict) else {}
+    except (json.JSONDecodeError, TypeError):
+        return {}
+
+
+def _row_to_wallet_profile(row, alerts: list[AlertResponse] | None = None) -> WalletProfile:
+    analysis = _parse_json_blob(row["analysis_json"])
+    categories = _parse_json_blob(row["categories_json"])
+    factors = analysis.get("factors", {}) if isinstance(analysis, dict) else {}
+    win_rate = analysis.get("win_rate", 0.0) if isinstance(analysis, dict) else 0.0
+    total_pnl = analysis.get("total_pnl", row["total_profit"] or 0.0) if isinstance(analysis, dict) else (row["total_profit"] or 0.0)
+    resolved_markets_count = analysis.get("resolved_markets_count", 0) if isinstance(analysis, dict) else 0
+    account_age_days = analysis.get("account_age_days") if isinstance(analysis, dict) else None
+    risk_score_value = row["risk_score"] if row["risk_score"] is not None else float(analysis.get("score", 0.0) if isinstance(analysis, dict) else 0.0)
+    return WalletProfile(
+        address=row["address"],
+        username=row["username"],
+        first_seen=row["first_seen"],
+        total_trades=row["total_trades"],
+        total_volume=row["total_volume"] or 0.0,
+        total_profit=row["total_profit"] if row["total_profit"] is not None else 0.0,
+        total_pnl=total_pnl if total_pnl is not None else 0.0,
+        risk_score=risk_score_value,
+        analysis=analysis,
+        categories=categories,
+        win_rate=win_rate or 0.0,
+        resolved_markets_count=resolved_markets_count or 0,
+        account_age_days=account_age_days,
+        score_label=score_label(risk_score_value),
+        why_flagged=why_flagged(factors, account_age_days),
+        top_factors=top_factor_names(factors),
+        followability_score=followability_score(
+            win_rate=float(win_rate or 0.0),
+            total_profit=float(row["total_profit"] or 0.0),
+            total_volume=float(row["total_volume"] or 0.0),
+            risk_score_value=float(risk_score_value or 0.0),
+            resolved_markets_count=int(resolved_markets_count or 0),
+        ),
+        alerts=alerts or [],
     )
 
 
@@ -130,33 +186,12 @@ async def get_wallet(address: str):
         )
         alert_rows = await cursor.fetchall()
 
-        categories: dict[str, float] = {}
-        if wallet_row and wallet_row["categories_json"]:
-            try:
-                categories = json.loads(wallet_row["categories_json"])
-            except (json.JSONDecodeError, TypeError):
-                pass
-
-        analysis: dict | None = None
-        if wallet_row and wallet_row["analysis_json"]:
-            try:
-                analysis = json.loads(wallet_row["analysis_json"])
-            except (json.JSONDecodeError, TypeError):
-                pass
-
-        return WalletProfile(
-            address=address,
-            username=wallet_row["username"] if wallet_row else None,
-            first_seen=wallet_row["first_seen"] if wallet_row else None,
-            total_trades=wallet_row["total_trades"] if wallet_row else 0,
-            total_volume=wallet_row["total_volume"] if wallet_row else 0.0,
-            total_profit=wallet_row["total_profit"] if wallet_row else 0.0,
-            risk_score=wallet_row["risk_score"] if wallet_row else 0.0,
-            analysis=analysis,
-            categories=categories,
-            win_rate=analysis.get("win_rate", 0.0) if analysis else 0.0,
-            alerts=[_row_to_alert(r) for r in alert_rows],
-        )
+        if wallet_row:
+            return _row_to_wallet_profile(
+                wallet_row,
+                alerts=[_row_to_alert(r) for r in alert_rows],
+            )
+        return WalletProfile(address=address, alerts=[])
     finally:
         await db.close()
 
@@ -397,39 +432,7 @@ async def get_insiders(
         )
         rows = await cursor.fetchall()
         
-        profiles = []
-        for row in rows:
-            analysis = {}
-            if row["analysis_json"]:
-                try:
-                    analysis = json.loads(row["analysis_json"])
-                except:
-                    pass
-            
-            categories = {}
-            if row["categories_json"]:
-                try:
-                    categories = json.loads(row["categories_json"])
-                except:
-                    pass
-
-            # We don't fetch alerts for the list view to stay light
-            profiles.append(
-                WalletProfile(
-                    address=row["address"],
-                    username=row["username"],
-                    first_seen=row["first_seen"],
-                    total_trades=row["total_trades"],
-                    total_volume=row["total_volume"],
-                    total_profit=row["total_profit"] if row["total_profit"] is not None else 0.0,
-                    risk_score=row["risk_score"],
-                    analysis=analysis,
-                    categories=categories,
-                    win_rate=analysis.get("win_rate", 0.0),
-                    alerts=[] 
-                )
-            )
-        return profiles
+        return [_row_to_wallet_profile(row) for row in rows]
     finally:
         await db.close()
 
@@ -463,42 +466,32 @@ async def get_whales(
         )
         rows = await cursor.fetchall()
 
-        profiles = []
-        for row in rows:
-            analysis = {}
-            if row["analysis_json"]:
-                try:
-                    analysis = json.loads(row["analysis_json"])
-                except:
-                    pass
-
-            win_rate = analysis.get("win_rate", 0.0)
-
-            categories = {}
-            if row["categories_json"]:
-                try:
-                    categories = json.loads(row["categories_json"])
-                except:
-                    pass
-
-            profiles.append(
-                WalletProfile(
-                    address=row["address"],
-                    username=row["username"],
-                    first_seen=row["first_seen"],
-                    total_trades=row["total_trades"],
-                    total_volume=row["total_volume"],
-                    total_profit=row["total_profit"] if row["total_profit"] is not None else 0.0,
-                    risk_score=row["risk_score"],
-                    analysis=analysis,
-                    categories=categories,
-                    win_rate=win_rate,
-                    alerts=[],
-                )
-            )
-        return profiles
+        return [_row_to_wallet_profile(row) for row in rows]
     finally:
         await db.close()
+
+
+@router.get("/intelligence/export")
+async def export_intelligence_snapshot():
+    """Export a JSON snapshot of the local intelligence store."""
+    repository = SQLiteSnapshotRepository()
+    return await repository.export_snapshot()
+
+
+@router.post("/intelligence/import", response_model=ImportSnapshotResponse)
+async def import_intelligence_snapshot(request: ImportSnapshotRequest):
+    """Import a JSON snapshot into the local intelligence store."""
+    from fastapi import HTTPException
+
+    repository = SQLiteSnapshotRepository()
+    try:
+        counts = await repository.import_snapshot(request.snapshot, mode=request.mode)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return ImportSnapshotResponse(
+        message="Snapshot imported successfully",
+        counts=counts,
+    )
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

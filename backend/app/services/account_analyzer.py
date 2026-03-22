@@ -28,6 +28,7 @@ from app.services.pnl_calculator import PnLCalculator
 from app.services.polygonscan import PolygonscanClient
 from app.services.scoring import (
     ScoringResult,
+    apply_conservative_wallet_age_filter,
     compute_bet_concentration,
     compute_entry_price_edge,
     compute_position_size_signal,
@@ -311,6 +312,7 @@ class AccountAnalyzer:
             account_pattern=f_pattern,
             position_size_signal=f_position,
         )
+        result, age_filter_applied = apply_conservative_wallet_age_filter(result, age_days)
 
         # ---- 9. Log detection ----
         if result.passes_gate:
@@ -336,6 +338,7 @@ class AccountAnalyzer:
             "max_single_market_usdc": max_single_market_usdc,
             "total_usdc_invested": total_usdc,
             "account_age_days": age_days,
+            "age_filter_applied": age_filter_applied,
             "username": username,
             "last_updated": datetime.now(timezone.utc).isoformat(),
             "score": result.score,

@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "node --test src/lib/*.test.js"
   },
   "dependencies": {
     "next": "16.1.6",
@@ -16,5 +17,6 @@
   "devDependencies": {
     "eslint": "^9",
     "eslint-config-next": "16.1.6"
-  }
+  },
+  "type": "module"
 }
